@@ -1,25 +1,28 @@
+/*
+** main.c -- stream (TCP) base
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
-#include <signal.h>
-#include <pthread.h>
-#include <time.h>
 #include <sys/ioctl.h>
-// #include <stropts.h>
+#include <sys/wait.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <pthread.h>
 #include <ctype.h>
+#include <string.h>
+// #include <stropts.h>
+#include <signal.h>
 #include <stdbool.h>
-#include "chord.h"
+#include <sys/time.h>
 
 #define BACKLOG 10
-#define MAX_DATA_SIZE 128 
+#define MAXDATASIZE 128 
 #define FILE_NAME "config.txt"
 #define PROC_COUNT 4
 #define TTLMSGNUM 50
@@ -28,19 +31,17 @@
 #define BASE_TEN    10	   // used to denote base ten in format conversion
 #define IPADDR_LEN  16     // length of char array to hold ip address
 #define PORT_LEN    6	   // length of char array to hold port number
-#define IP "127.0.0.1"
-
-//define global variables 
-char* holdBack[TTLMSGNUM];
 
 /* Host Machine Info */
 char my_port[PORT_LEN];
 int my_pid;
-bool server_created = false;
-
-char PORTS[PROC_COUNT][8];
-int socketdrive[PROC_COUNT];
 int min_delay, max_delay;
+
+/* Array of Socket Descriptors */
+int sockets[PROC_COUNT];
+
+/* State variable & Flags */
+bool server_created = false;
 
 /* Struct to pass to thread to create server */
 typedef struct Config_info{
@@ -56,176 +57,84 @@ typedef struct Client_info{
 } Client_info;
 
 /* Reap all dead processes */
-void sigchld_handler(int s)
-{
+void sigchld_handler(int s){
+	(void)s; // quiet unused variable warning
+
+	// waitpid() might overwrite errno, so we save and restore it:
+	int saved_errno = errno;
+
 	while(waitpid(-1, NULL, WNOHANG) > 0);
+
+	errno = saved_errno;
 }
 
 /* Get sockaddr, IPv4 or IPv6: */
-void *get_in_addr(struct sockaddr *sa)
-{
-	if(sa->sa_family == AF_INET){
+void *get_in_addr(struct sockaddr *sa){
+	if (sa->sa_family == AF_INET) {
 		return &(((struct sockaddr_in*)sa)->sin_addr);
 	}
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
 
-/* Creating clients */
-void *setupConnection(void* arg)
-{
-	struct Client_info *data = (struct Client_info *) arg;
-	printf("THREAD: Client Creation initiated to connect to %s...\n", data->ip_addr);
+/* Unicast Functionality */
+void unicast(void * arg){
+	char * casted_message = (char*) arg;
+	int sd = atoi(&casted_message[0]);
 
-	int sockfd, numbytes;  
-	char buf[MAX_DATA_SIZE];
-	struct addrinfo hints, *servinfo, *p;
-	int rv;
-	char s[INET6_ADDRSTRLEN];
+	if (send(sockets[sd], &casted_message[1], strlen(casted_message)-1, 0) == -1)
+				perror("send");
+	return;
+}
 
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-
-	char connection_port[PORT_LEN];
-	sprintf(connection_port, "%ld",data->port);
-
-	if ((rv = getaddrinfo(data->ip_addr, connection_port, &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-		//return 1;
-		pthread_exit(NULL);
-	}
-
-	// Sleep temporarily to allow other machines to finish setup
-	sleep(SETUP_WAIT);
-
-	// Loop through all the results and connect to the first we can
-	for(p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype,
-				p->ai_protocol)) == -1) {
-			perror("client: socket");
-			continue;
-		}
-
-		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-			//perror("client: connect");
-			close(sockfd);
-			continue;
-		}
-		break;
-	}
-
-	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
-			s, sizeof s);
-	printf("client: connecting to %s\n", s);
-	freeaddrinfo(servinfo); // all done with this structure
-
-	
-
-	while(((numbytes = recv(sockfd, buf, MAX_DATA_SIZE-1, 0)) > 0)){
-		
-	}
-
-	close(sockfd);
-	printf("--CONNECTION HAS BEEN CLOSED--\n");
+/* Thread to add Unicast Functionality Delay */
+void * unicast_delay(void* arg){
+	char * msg = (char*) arg;
+	sleep(min_delay + rand()%(max_delay+1 -min_delay));
+	unicast(msg);
+	//free();
 	pthread_exit(NULL);
 }
 
-/*
-	unicast_send:
-	input:
-		dest: the destination of the message to send
-		message: message
-	function:
-		1. cast the message with pid
-		2. simulate the transmission delay
-		3. send the message
-*/
-void unicast_send(int dest, char* message){
-	char casted_message[strlen(message)+2];
-	int delay_per_send = rand()%(max_delay - min_delay) + min_delay;;
+/* Multicast Functionality */
+void multicast(void *arg){
+	char * message = (char*) arg;
+	char * casted_message;
 
-
-	strcpy(&(casted_message[2]), message);
-
-	sleep(delay_per_send);
-	if(send(socketdrive[dest], casted_message, strlen(casted_message),0) == -1) 
-		return;
-}
-
-/*
-	unicast:
-	a thread wrapper of unicast_send(dest, message)
-*/
-void *unicast(void *arg)
-{
-	char* message = (char*)arg;
-	unicast_send(atoi(&(message[0])), &(message[1]));
-	pthread_exit((void *)0);
-}
-
-void *multicast(void* arg){
-	char* message = (char*)arg;
-	char* casted_message;
-	pthread_t *tid = malloc(PROC_COUNT* sizeof(pthread_t));
-//	strcpy(multi_message, message);
-	int i = 0;
-
-	for(i = 0; i < PROC_COUNT;i++){
-		if(message[0] == 'o' && i == 0)
-			continue;
-		casted_message = malloc((strlen(message)+2)*sizeof(char));
-		sprintf(casted_message,"%d",i);
+	pthread_t u_delay[PROC_COUNT];
+	for(int i = 0; i < PROC_COUNT; i++){
+		
+		casted_message = malloc(sizeof(char)* (strlen(message)+2));
+		sprintf(casted_message, "%d", i);
 		strcpy(&(casted_message[1]), message);
-		pthread_create(&tid[i], NULL, unicast,(void*)casted_message);
-	}
-	for(i = 0; i < PROC_COUNT; i++){
-		pthread_join( tid[i], NULL);
-	}
-	free(tid);
 
-	pthread_exit((void *)0);
-}
 
-/*
-	stdin_read:
-		read from the terminal
-		function:
-			1. if command is 'put x 1':
-				multicast the message in the form: px1
-			2. if command is 'get x':
-				multicast the message in teh form: gx
-			3. if command is 'dump':
-				display all the local vaiables
-			4. if command is 'delay x':
-				put the thread in sleep for x millisecs
-*/
-void *stdin_client(void *arg){
-	char command[16];
-	char* message= malloc(4*sizeof(char));
-	pthread_t chld_thr;
-	int i;
-
-	while(fgets(command, sizeof(command), stdin) > 0){
-		command[strlen(command)-1] = '\0';
+		int rc;
+		rc = pthread_create(&u_delay[i], NULL, unicast_delay, (void*)casted_message);
+		if(rc){
+			printf("ERROR W/ THREAD CREATION.\n");
+			exit(-1);
+		}		
 	}
-	pthread_exit((void *)0);
+
+	for(int i = 0; i <PROC_COUNT; i++){
+		pthread_join(u_delay[i], NULL);
+	}
+	return;
 }
 
 
-/* HANDLE CONNECTION */
-/* Thread to handle receiving messages from clients of local server */
+/* Thread to handle receiving messages from remote clients to local server */
 void * handle_connection(void* sd){
 	int numbytes;
-	char buf[MAX_DATA_SIZE];
+	char buf[MAXDATASIZE];
 	int new_fd = *(int*) sd;
-	static int messages_counter = 0;
 
-	while((numbytes = recv(new_fd, buf, MAX_DATA_SIZE-1, 0)) > 0)
+	while((numbytes = recv(new_fd, buf, MAXDATASIZE-1, 0)) > 0)
 	{
 		buf[numbytes] = '\0';
 		
-		// printf("-- Server: received '%s' --\n",buf);
+		printf("Server: Received '%s' --\n",buf);
 		// printf("-- Messages counter: %d  --\n", messages_counter);
 		// printf("r_count: %d\nread_op: %d\n", r_count, read_op);
 		// printf("w_count: %d\nwrite_op: %d\n", w_count, write_op);
@@ -275,10 +184,8 @@ void * thread_create_server(void * cinfo){
 	for(x = 0; x < PROC_COUNT; x++){
 		// Bind to first unused port on local machine in config file
 		sprintf(my_port, "%ld",data->ports[x]);
-
 		if ((rv = getaddrinfo(NULL, my_port, &hints, &servinfo)) != 0) {
 			fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-			//return 1;
 			pthread_exit(NULL);
 		}
 
@@ -301,9 +208,7 @@ void * thread_create_server(void * cinfo){
 				close(sockfd);
 				perror("server: bind");
 				continue;
-				//break;
 			}
-
 			break;
 		}
 
@@ -322,13 +227,11 @@ void * thread_create_server(void * cinfo){
 
 	if (p == NULL)  {
 		fprintf(stderr, "server: failed to bind\n");
-		//exit(1);
 		pthread_exit(NULL);
 	}
 
 	if (listen(sockfd, BACKLOG) == -1) {
 		perror("listen");
-		//exit(1);
 		pthread_exit(NULL);
 	}
 
@@ -337,10 +240,8 @@ void * thread_create_server(void * cinfo){
 	sa.sa_flags = SA_RESTART;
 	if (sigaction(SIGCHLD, &sa, NULL) == -1) {
 		perror("sigaction");
-		//exit(1);
 		pthread_exit(NULL);
 	}
-
 	printf("[PID:%lu] - Server now waiting for connections...\n\n", data->pids[x]);
 
 	// handle_this thread will handle connections accepted by local server
@@ -355,7 +256,7 @@ void * thread_create_server(void * cinfo){
 		}
 
 		// Add to array of Server-Client sockets
-		socketdrive[socket_idx] = new_fd;
+		sockets[socket_idx] = new_fd;
 		socket_idx++;
 
 		// Print connector info
@@ -366,25 +267,118 @@ void * thread_create_server(void * cinfo){
 		printf("[Server id(%lu)]: Got connection from %s.\n", data->pids[x], s);
 
 		// Have thread handle the new connection
-		pthread_create(&handle_this, NULL, handle_connection, &new_fd);
-	}
+		int rc;
+		rc = pthread_create(&handle_this, NULL, handle_connection, &new_fd);
+		if(rc){
+			printf("ERROR W/ THREAD CREATION.\n");
+			exit(-1);
+		}
 	
+	}
+
 	// free(cinfo);
 	pthread_exit(NULL);
 }
 
+/* Thread for creating a Client socket per Process ID */
+void * thread_create_client(void * cl_info){
+	struct Client_info *data = (struct Client_info *) cl_info;
+	printf("THREAD: Client Creation initiated to connect to %s...\n", data->ip_addr);
+
+	int sockfd, numbytes;  
+	char buf[MAXDATASIZE];
+	struct addrinfo hints, *servinfo, *p;
+	int rv;
+	char s[INET6_ADDRSTRLEN];
+
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	char connection_port[PORT_LEN];
+	sprintf(connection_port, "%ld",data->port);
+
+	if ((rv = getaddrinfo(data->ip_addr, connection_port, &hints, &servinfo)) != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		pthread_exit(NULL);
+	}
+
+	// Sleep temporarily to allow other machines to finish setup
+	sleep(SETUP_WAIT);	
+
+	// Loop through all the results and connect to the first we can
+	for(p = servinfo; p != NULL; p = p->ai_next) {
+		if ((sockfd = socket(p->ai_family, p->ai_socktype,
+				p->ai_protocol)) == -1) {
+			perror("client: socket");
+			continue;
+		}
+
+		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			//perror("client: connect");
+			close(sockfd);
+			continue;
+		}
+		break;
+	}
+
+	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
+			s, sizeof s);
+	printf("client: connecting to %s\n", s);
+
+	freeaddrinfo(servinfo); // all done with this structure
+
+	while(((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) > 0))
+	{
+		buf[numbytes] = '\0';
+
+		printf("Client: Received: '%s'\n",buf);
+
+	}
+
+	close(sockfd);
+	printf("--CONNECTION HAS BEEN CLOSED--\n");
+	pthread_exit(NULL);
+}
+
+// /* Thread to keep multicasting when Multicast buffer has message */
+void * thread_mcast(void* m){
+	char * mcast_msg = (char *)m;
+	char * temp_msg = malloc(strlen(mcast_msg) * sizeof(char));
+	strcpy(temp_msg, mcast_msg);
+	multicast(temp_msg);
+	pthread_exit(NULL);
+}
+
+/* Thread for taking commands and multicasting */
+void *stdin_client(void *arg){
+	char command[16];
+	while(fgets(command, sizeof(command), stdin) > 0){
+		command[strlen(command)-1] = '\0';
+
+		// Exit STDIN Thread
+		if(strcmp(command, "quit") == 0){
+			break;
+		}
+
+		pthread_t mcast_me;
+		pthread_create(&mcast_me, NULL, thread_mcast, (void*)command);
+	}
+	pthread_exit(NULL);
+}
 
 /* MAIN THREAD */
 int main(int argc, char *argv[])
 {
+
 	/********  CONFIG FILE PARSING ********/
-	FILE *file = fopen(FILE_NAME, "r");
+	FILE *file = fopen("config.txt", "r");
 	char *file_buf = NULL;
 	char *str = NULL;
 	int file_len;
 	int parse_sel= 0;
 	int i = 0;
-
+	
 	if(file != NULL){
 		// Get size of file
 		if(fseek(file, 0L, SEEK_END) == 0){
@@ -423,16 +417,13 @@ int main(int argc, char *argv[])
 		// Parsing
 		if(parse_sel == 0){
 			// Parse Channel Delays
-			if(isdigit(*str)){
+			if(isdigit(*str))
 				min_delay = strtol(str, &str, BASE_TEN);
-			}
 			str++;
 
-			if(isdigit(*str)){
+			if(isdigit(*str))
 				max_delay = strtol(str, &str, BASE_TEN);
-			}
 			str++;
-
 			parse_sel++;
 		}
 		else if(parse_sel == 1){
@@ -485,14 +476,13 @@ int main(int argc, char *argv[])
 		i++;
 	}
 
-	// for(int x = 0; x< PROC_COUNT; x++)
-	// 	printf("sep_ips[%d] = %s\n", x, sep_ips[x]);
-
 	/* THREAD CREATIONS */
 	pthread_t proc_server;
 	pthread_t proc_client[PROC_COUNT];
 	pthread_t stdin_thread;
 	int rc;
+
+	printf("FUCK\n");
 
 	// Create Server Thread
 	struct Config_info *cinfo;
@@ -514,7 +504,7 @@ int main(int argc, char *argv[])
 			cl_info = malloc(sizeof(struct Client_info));
 			cl_info->port = ports[x];
 			cl_info->ip_addr = sep_ips[x];
-			pthread_create(&proc_client[x], NULL, setupConnection, (void*)cl_info);
+			pthread_create(&proc_client[x], NULL, thread_create_client, (void*)cl_info);
 		}
 		pthread_create(&stdin_thread, NULL, stdin_client, NULL);
 	}
@@ -523,9 +513,10 @@ int main(int argc, char *argv[])
 		cl_info = malloc(sizeof(struct Client_info));
 		cl_info->port = ports[0];
 		cl_info->ip_addr = sep_ips[0];
-		pthread_create(&proc_client[0], NULL, setupConnection, (void*)cl_info);
+		pthread_create(&proc_client[0], NULL, thread_create_client, (void*)cl_info);
 	}
 
 	pthread_exit(NULL);
 	return 0;
 }
+
