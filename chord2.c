@@ -43,6 +43,9 @@ int sockets[PROC_COUNT];
 /* State variable & Flags */
 bool server_created = false;
 
+/* Multicast Buffer */
+char mc_buf[1024];
+
 /* Struct to pass to thread to create server */
 typedef struct Config_info{
 	long *pids;
@@ -77,50 +80,46 @@ void *get_in_addr(struct sockaddr *sa){
 }
 
 
-/* Unicast Functionality */
-void unicast(void * arg){
-	char * casted_message = (char*) arg;
-	int sd = atoi(&casted_message[0]);
+/* Unicast Functionality with delay */
+void unicast_send(char* message){
+	char * casted_message = (char*) message;
+	char sd_char = casted_message[0];
+	int sd = atoi(&sd_char);
 
+	sleep(min_delay + rand()%(max_delay+1 -min_delay));
 	if (send(sockets[sd], &casted_message[1], strlen(casted_message)-1, 0) == -1)
 				perror("send");
-	return;
+	return;	
 }
 
-/* Thread to add Unicast Functionality Delay */
-void * unicast_delay(void* arg){
-	char * msg = (char*) arg;
-	sleep(min_delay + rand()%(max_delay+1 -min_delay));
-	unicast(msg);
-	//free();
+/* Unicast: a thread wrapper of unicast_send(message) */
+void *unicast(void *arg)
+{
+	char* message = (char*)arg;
+	unicast_send(message);
 	pthread_exit(NULL);
 }
 
 /* Multicast Functionality */
-void multicast(void *arg){
-	char * message = (char*) arg;
-	char * casted_message;
+void *multicast(void* arg){
+	char* message = (char*)arg;
+	char* casted_message;
+	pthread_t *tid = malloc(PROC_COUNT* sizeof(pthread_t));
+	int i = 0;
+	for(i = 0; i < PROC_COUNT;i++){
 
-	pthread_t u_delay[PROC_COUNT];
-	for(int i = 0; i < PROC_COUNT; i++){
-		
-		casted_message = malloc(sizeof(char)* (strlen(message)+2));
-		sprintf(casted_message, "%d", i);
+		casted_message = malloc((strlen(message)+2)*sizeof(char));
+		sprintf(casted_message,"%d",i);
 		strcpy(&(casted_message[1]), message);
-
-
-		int rc;
-		rc = pthread_create(&u_delay[i], NULL, unicast_delay, (void*)casted_message);
-		if(rc){
-			printf("ERROR W/ THREAD CREATION.\n");
-			exit(-1);
-		}		
+		printf("casted_message: %s\n", casted_message);
+		pthread_create(&tid[i], NULL, unicast,(void*)casted_message);
 	}
-
-	for(int i = 0; i <PROC_COUNT; i++){
-		pthread_join(u_delay[i], NULL);
+	for(i = 0; i < PROC_COUNT; i++){
+		pthread_join( tid[i], NULL);
 	}
-	return;
+	free(tid);
+
+	pthread_exit((void *)0);
 }
 
 
@@ -342,29 +341,42 @@ void * thread_create_client(void * cl_info){
 }
 
 // /* Thread to keep multicasting when Multicast buffer has message */
-void * thread_mcast(void* m){
-	char * mcast_msg = (char *)m;
-	char * temp_msg = malloc(strlen(mcast_msg) * sizeof(char));
-	strcpy(temp_msg, mcast_msg);
-	multicast(temp_msg);
-	pthread_exit(NULL);
-}
+// void * thread_mcast(void* m){
+// 	char * mcast_msg = (char *)m;
+// 	char * temp_msg = malloc(strlen(mcast_msg) * sizeof(char));
+// 	strcpy(temp_msg, mcast_msg);
+// 	multicast(temp_msg);
+// 	pthread_exit(NULL);
+// }
 
 /* Thread for taking commands and multicasting */
 void *stdin_client(void *arg){
-	char command[16];
-	while(fgets(command, sizeof(command), stdin) > 0){
-		command[strlen(command)-1] = '\0';
+	while(1){
+		// Store commands in buffer
+		char input_buf[MAXDATASIZE];
+		fgets(input_buf, MAXDATASIZE, stdin);
+		input_buf[strlen(input_buf) -1] = '\0';
 
-		// Exit STDIN Thread
-		if(strcmp(command, "quit") == 0){
-			break;
+		// Set up Multicast buffer
+		mc_buf[0] = '\0';
+		strcat(mc_buf, input_buf);
+
+		printf("mc_buf: %s\n", mc_buf);
+		pthread_t mcast_me;
+		int rc = pthread_create(&mcast_me, NULL, multicast, (void*)mc_buf);
+		if(rc){
+			printf("ERROR W/ THREAD FOR SERVER CREATION.\n");
+			exit(-1);
 		}
 
-		pthread_t mcast_me;
-		pthread_create(&mcast_me, NULL, thread_mcast, (void*)command);
+		// Exit STDIN Thread
+		if(strcmp(input_buf, "quit") == 0){
+			printf("Quitting stdin thread...\n");
+			break;
+		}
 	}
-	pthread_exit(NULL);
+
+	pthread_exit(NULL);	
 }
 
 /* MAIN THREAD */
