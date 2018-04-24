@@ -358,11 +358,14 @@ void * thread_create_client(void * cl_info){
 
 		if(buf[0] == 'j'){
 			memcpy(&my_node, &buf[1], sizeof(Node));
+			my_node.keys[my_node.nodeId] = true;
 			printf("my_node.node_id = %d\n", my_node.nodeId);
 			printf("my_node.predecessor = %d\n", my_node.predecessor);
 			printf("my_node.successor = %d\n", my_node.successor);
 			for(int i = 0; i < NUMBER_OF_BITS; i++)
 				printf("my_node.finger[%d] = %d\n",i,my_node.fingerTable[i]);
+			for(int i = 0; i < 256; i++)
+				printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
 		}
 		
 
@@ -404,9 +407,10 @@ Node init_finger_table(int new_id){
 	Node add_node;
 	add_node.nodeId = new_id;
 
-	int start = new_id + 1;
+	int start = (new_id + 1)%256;
 	int i = start;
 
+	/* This loop is used to find succesor/predecessor of new node */
 	bool forward = true;
 	while(1){
 
@@ -431,23 +435,24 @@ Node init_finger_table(int new_id){
 			}
 			else{
 				i--;
-				if(i == 0)
+				if(i == -1)
 					i == 255;
 			}	
 		}	
 	}
 
-
+	/* For loop to aid in finger table initialization */
 	for(int i = 1; i < NUMBER_OF_BITS; i++){
 		int t_start = new_id + pow(2,i);
-		if(t_start <= add_node.successor)
+		t_start = t_start%256;
+		if(t_start <= add_node.successor && ((new_id + pow(2,i)) < 256) )
 			add_node.fingerTable[i] = add_node.successor;
 		else{
 			int j = t_start;
 			while(1){
 				// Finding next entry of finger table
 				if(j > 255)
-					j = j%255;
+					j = j%256;
 
 				if(node_id[j] >= 0){
 					add_node.fingerTable[i]= j;
@@ -460,6 +465,19 @@ Node init_finger_table(int new_id){
 			}
 		}
 	}
+
+	/* Key Distribution for new node */
+	for(int i = 0; i < 256; i++){
+		if(i >= add_node.predecessor+1 && i <= add_node.nodeId )
+			add_node.keys[i] = true;
+		else
+			add_node.keys[i] = false;
+	}
+
+
+	// for(int i = add_node.predecessor+1; i <= add_node.nodeId; i++)
+	// 	add_node.keys[i] = true;
+
 	return add_node;
 }
 
@@ -492,7 +510,9 @@ void *stdin_client(void *arg){
 			printf("add_node.predecessor = %d\n", add_node.predecessor);
 			printf("add_node.successor = %d\n", add_node.successor);
 			for(int i = 0; i < NUMBER_OF_BITS; i++)
-				printf("add_node.finger[%d] = %d\n",i,add_node.fingerTable[i]);
+				printf("add_node.fingerTable[%d] = %d\n",i,add_node.fingerTable[i]);
+			for(int i = 0; i < 256; i++)
+				printf("add_node.keys[%d] = %d\n",i,add_node.keys[i]);
 			
 			// Send Struct to new node
 			char *msg = malloc(sizeof(Node)+3);
@@ -512,6 +532,11 @@ void *stdin_client(void *arg){
 			sprintf(&(msg[3]),"%d",p);
 			printf("join:%s\n", msg);
 			unicast_send(msg);
+
+			// Tell other nodes to update their keys
+
+
+			// Tell other nodes to update their finger tables
 		}
 
 
@@ -678,12 +703,13 @@ int main(int argc, char *argv[])
 	my_node.fingerTable[7] = my_pid;
 
 	// Initialize boolean array of keys
-	if(my_pid == 0)
+	if(my_pid == 0){
 		for(int x = 0; x < 256; x++)
-			my_node.keys[x] = 1;
+			my_node.keys[x] = true;
+	}
 	else
 		for(int x = 0; x < 256; x++)
-			my_node.keys[x] = 0;
+			my_node.keys[x] = false;
 
 	// Used_pid array initialization (i.e., everyone connected to Node 0)
 	used_pid[0] = true;
