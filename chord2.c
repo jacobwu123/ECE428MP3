@@ -20,6 +20,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <sys/time.h>
+#include "chord.h"
 
 #define BACKLOG 10
 #define MAXDATASIZE 128 
@@ -42,6 +43,8 @@ int sockets[PROC_COUNT];
 
 /* State variable & Flags */
 bool server_created = false;
+bool used_pid[PROC_COUNT] = {false};
+int node_id[256];
 
 /* Multicast Buffer */
 char mc_buf[1024];
@@ -58,6 +61,9 @@ typedef struct Client_info{
 	long port;
 	char* ip_addr;
 } Client_info;
+
+/* Global Struct */
+Node my_node;
 
 /* Reap all dead processes */
 void sigchld_handler(int s){
@@ -80,11 +86,13 @@ void *get_in_addr(struct sockaddr *sa){
 }
 
 
+/*  */
+int offset = 32;
 /* Unicast Functionality with delay */
 void unicast_send(char* message){
 	char * casted_message = (char*) message;
-	char sd_char = casted_message[0];
-	int sd = atoi(&sd_char);
+	int sd = (int)casted_message[0] - offset;
+	// int sd = atoi(&sd_char);
 
 	sleep(min_delay + rand()%(max_delay+1 -min_delay));
 	if (send(sockets[sd], &casted_message[1], strlen(casted_message)-1, 0) == -1)
@@ -109,9 +117,8 @@ void *multicast(void* arg){
 	for(i = 0; i < PROC_COUNT;i++){
 
 		casted_message = malloc((strlen(message)+2)*sizeof(char));
-		sprintf(casted_message,"%d",i);
+		sprintf(casted_message,"%c",(char)(i+offset));
 		strcpy(&(casted_message[1]), message);
-		printf("casted_message: %s\n", casted_message);
 		pthread_create(&tid[i], NULL, unicast,(void*)casted_message);
 	}
 	for(i = 0; i < PROC_COUNT; i++){
@@ -330,7 +337,6 @@ void * thread_create_client(void * cl_info){
 	while(((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) > 0))
 	{
 		buf[numbytes] = '\0';
-
 		printf("Client: Received: '%s'\n",buf);
 
 	}
@@ -348,32 +354,131 @@ void * thread_create_client(void * cl_info){
 // 	multicast(temp_msg);
 // 	pthread_exit(NULL);
 // }
+// int closest_preceding_finger(int id){
 
-/* Thread for taking commands and multicasting */
+// }
+
+// int find_predecessor(int id){
+// 	int n_prime = my_node.nodeId;
+// 	int successor = ;
+// 	//find 
+// 	while(id < n_prime || id > successor){
+// 		n_prime = closest_preceding_finger(id);
+// 	}
+// 	return n_prime;
+// }
+
+// int find_successor(int id){
+// 	int predecessor = find_predecessor(id);
+
+// }
+
+Node init_finger_table(int new_id){
+	Node add_node;
+	add_node.nodeId = new_id;
+
+	int start = new_id + 1;
+	int i = start;
+
+	bool forward = true;
+	while(1){
+
+		if(forward) {
+			// Finding successor
+			if(node_id[i] >= 0){
+				add_node.fingerTable[0]= i;
+				add_node.successor = i;
+				forward = false;
+				i = new_id - 1;
+			}
+			else
+				i++;
+			if(i == 256)
+				i = 0;
+		}
+		else{
+			// Finding predecessor
+			if( (i != new_id) && (i < new_id) && (node_id[i] >= 0)){
+				add_node.predecessor = i;
+				break;
+			}
+			else{
+				i--;
+				if(i == 0)
+					i == 255;
+			}	
+		}	
+	}
+
+	return add_node;
+}
+
+/* Thread for taking inputs and multicasting */
 void *stdin_client(void *arg){
 	while(1){
-		// Store commands in buffer
-		char input_buf[MAXDATASIZE];
-		fgets(input_buf, MAXDATASIZE, stdin);
-		input_buf[strlen(input_buf) -1] = '\0';
+		// Store inputs in buffer
+		char input[MAXDATASIZE];
+		fgets(input, MAXDATASIZE, stdin);
+		input[strlen(input) -1] = '\0';
+
+		if(input[0] == 'j'){ // join op
+			int p = atoi(&input[5]);
+			int unused_idx;
+			for(int x = 0; x < PROC_COUNT; x++){
+				if(used_pid[x] == false){
+					used_pid[x] = true;
+					unused_idx = x;
+					node_id[p] = x;
+					break;
+				}
+			}
+
+			for(int i = 0; i < 256; i++)
+				printf("node_id{%d] : %d\n", i, node_id[i]);
+			char msg[sizeof(input)+1];
+			sprintf(msg,"%c",(char)(node_id[p]+offset));
+			strcpy(&(msg[1]), input);
+			printf("join:%s\n", msg);
+
+			// ****************
+			Node add_node = init_finger_table(p);
+
+			printf("add_node: finger[0] = %d\n", add_node.fingerTable[0]);
+			printf("add_node: successor = %d\n", add_node.successor);
+			printf("add_node: predecessor = %d\n", add_node.predecessor);
+
+			
+			//make a finger table
+			unicast_send(msg);
+
+			memset(msg, '\0', sizeof(msg));
+			// Tell successor of new node to update it's predecessor
+			sprintf(msg,"%c",(char)(node_id[add_node.predecessor]+offset));
+			// printf("node_id[p]: %d\n", node_id[p]);
+			strcpy(&(msg[1]), "up");
+			sprintf(&(msg[3]),"%d",p);
+			printf("join:%s\n", msg);
+			unicast_send(msg);
+
+		}
+
 
 		// Set up Multicast buffer
-		mc_buf[0] = '\0';
-		strcat(mc_buf, input_buf);
+		// mc_buf[0] = '\0';
+		// strcat(mc_buf, input);
+		// pthread_t mcast_me;
+		// int rc = pthread_create(&mcast_me, NULL, multicast, (void*)mc_buf);
+		// if(rc){
+		// 	printf("ERROR W/ THREAD FOR SERVER CREATION.\n");
+		// 	exit(-1);
+		// }
 
-		printf("mc_buf: %s\n", mc_buf);
-		pthread_t mcast_me;
-		int rc = pthread_create(&mcast_me, NULL, multicast, (void*)mc_buf);
-		if(rc){
-			printf("ERROR W/ THREAD FOR SERVER CREATION.\n");
-			exit(-1);
-		}
+		// // Exit STDIN Thread
+		// if(strcmp(input, "quit") == 0){
+		// 	printf("Quitting stdin thread...\n");
+		// 	break;
+		// }
 
-		// Exit STDIN Thread
-		if(strcmp(input_buf, "quit") == 0){
-			printf("Quitting stdin thread...\n");
-			break;
-		}
 	}
 
 	pthread_exit(NULL);	
@@ -494,8 +599,6 @@ int main(int argc, char *argv[])
 	pthread_t stdin_thread;
 	int rc;
 
-	printf("FUCK\n");
-
 	// Create Server Thread
 	struct Config_info *cinfo;
 	cinfo =  malloc(sizeof(struct Config_info));
@@ -510,6 +613,36 @@ int main(int argc, char *argv[])
 	
 	// Create Client Threads
 	while(!server_created);
+
+	// Initialize global Node struct
+	my_node.nodeId = my_pid;
+	my_node.predecessor = my_pid;
+	my_node.successor = my_pid;
+	my_node.fingerTable[0] = my_pid;
+	my_node.fingerTable[1] = my_pid;
+	my_node.fingerTable[2] = my_pid;
+	my_node.fingerTable[3] = my_pid;
+	my_node.fingerTable[4] = my_pid;
+	my_node.fingerTable[5] = my_pid;
+	my_node.fingerTable[6] = my_pid;
+	my_node.fingerTable[7] = my_pid;
+
+	// Initialize boolean array of keys
+	if(my_pid == 0)
+		for(int x = 0; x < 256; x++)
+			my_node.keys[x] = 1;
+	else
+		for(int x = 0; x < 256; x++)
+			my_node.keys[x] = 0;
+
+	// Used_pid array initialization (i.e., everyone connected to Node 0)
+	used_pid[0] = true;
+	for(int i = 0; i < 256; i++){
+		node_id[i] = -1;
+	}
+	node_id[0] = 0;
+
+
 	struct Client_info *cl_info;
 	if(my_pid == 0){
 		for(int x = 0; x < PROC_COUNT; x++){

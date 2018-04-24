@@ -1,7 +1,8 @@
 #ifndef CHORD_H
 #define CHORD_H
 
-#define NUMBER_OF_BITS 7
+#include <stdbool.h>
+#define NUMBER_OF_BITS 8
 
 typedef struct{
 	int nodeId;
@@ -9,7 +10,7 @@ typedef struct{
 	int successor;
 
 	int fingerTable[NUMBER_OF_BITS];
-	int keys[128];
+	bool keys[256];
 
 }Node;
 
