@@ -20,10 +20,11 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <sys/time.h>
+#include <math.h>
 #include "chord.h"
 
 #define BACKLOG 10
-#define MAXDATASIZE 128 
+#define MAXDATASIZE 1024 
 #define FILE_NAME "config.txt"
 #define PROC_COUNT 4
 #define TTLMSGNUM 50
@@ -85,6 +86,21 @@ void *get_in_addr(struct sockaddr *sa){
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+/* Serialize Node Struct */
+int serialize(const Node* add_node, char* msg){
+    int bytes = 0;
+    memcpy(msg + bytes, &(add_node->nodeId), sizeof(add_node->nodeId));
+    bytes += sizeof(add_node->nodeId);
+    memcpy(msg + bytes, &(add_node->predecessor), sizeof(add_node->predecessor));
+    bytes +=  sizeof(add_node->predecessor);
+    memcpy(msg + bytes, &(add_node->successor), sizeof(add_node->successor));
+    bytes += sizeof(add_node->successor);
+    memcpy(msg +bytes, &(add_node->fingerTable), sizeof(add_node->fingerTable));
+    bytes += sizeof(add_node->fingerTable);
+    memcpy(msg + bytes , &(add_node->keys), sizeof(add_node->keys));
+    bytes +=  sizeof(add_node->keys);
+    return bytes;
+}
 
 /*  */
 int offset = 32;
@@ -139,8 +155,9 @@ void * handle_connection(void* sd){
 	while((numbytes = recv(new_fd, buf, MAXDATASIZE-1, 0)) > 0)
 	{
 		buf[numbytes] = '\0';
-		
 		printf("Server: Received '%s' --\n",buf);
+
+
 		// printf("-- Messages counter: %d  --\n", messages_counter);
 		// printf("r_count: %d\nread_op: %d\n", r_count, read_op);
 		// printf("w_count: %d\nwrite_op: %d\n", w_count, write_op);
@@ -339,6 +356,16 @@ void * thread_create_client(void * cl_info){
 		buf[numbytes] = '\0';
 		printf("Client: Received: '%s'\n",buf);
 
+		if(buf[0] == 'j'){
+			memcpy(&my_node, &buf[1], sizeof(Node));
+			printf("my_node.node_id = %d\n", my_node.nodeId);
+			printf("my_node.predecessor = %d\n", my_node.predecessor);
+			printf("my_node.successor = %d\n", my_node.successor);
+			for(int i = 0; i < NUMBER_OF_BITS; i++)
+				printf("my_node.finger[%d] = %d\n",i,my_node.fingerTable[i]);
+		}
+		
+
 	}
 
 	close(sockfd);
@@ -410,6 +437,29 @@ Node init_finger_table(int new_id){
 		}	
 	}
 
+
+	for(int i = 1; i < NUMBER_OF_BITS; i++){
+		int t_start = new_id + pow(2,i);
+		if(t_start <= add_node.successor)
+			add_node.fingerTable[i] = add_node.successor;
+		else{
+			int j = t_start;
+			while(1){
+				// Finding next entry of finger table
+				if(j > 255)
+					j = j%255;
+
+				if(node_id[j] >= 0){
+					add_node.fingerTable[i]= j;
+					break;
+				}
+				else
+					j++;
+				if(j == 256)
+					j = 0;
+			}
+		}
+	}
 	return add_node;
 }
 
@@ -435,31 +485,33 @@ void *stdin_client(void *arg){
 
 			for(int i = 0; i < 256; i++)
 				printf("node_id{%d] : %d\n", i, node_id[i]);
-			char msg[sizeof(input)+1];
-			sprintf(msg,"%c",(char)(node_id[p]+offset));
-			strcpy(&(msg[1]), input);
-			printf("join:%s\n", msg);
 
-			// ****************
+			/* Initialize finger table for new node */
 			Node add_node = init_finger_table(p);
-
-			printf("add_node: finger[0] = %d\n", add_node.fingerTable[0]);
-			printf("add_node: successor = %d\n", add_node.successor);
-			printf("add_node: predecessor = %d\n", add_node.predecessor);
-
+			printf("add_node.node_id = %d\n", add_node.nodeId);
+			printf("add_node.predecessor = %d\n", add_node.predecessor);
+			printf("add_node.successor = %d\n", add_node.successor);
+			for(int i = 0; i < NUMBER_OF_BITS; i++)
+				printf("add_node.finger[%d] = %d\n",i,add_node.fingerTable[i]);
 			
-			//make a finger table
-			unicast_send(msg);
-
-			memset(msg, '\0', sizeof(msg));
+			// Send Struct to new node
+			char *msg = malloc(sizeof(Node)+3);
+			sprintf(msg,"%c",(char)(node_id[p]+offset));
+			msg[0] = 'j';
+			int len = serialize(&add_node, &msg[1]);
+			msg[len] = '\0';
+			sleep(min_delay + rand()%(max_delay+1 -min_delay));
+			if (send(sockets[node_id[p]], msg, sizeof(Node)+1, 0) == -1){
+				perror("send");
+			}
+			
 			// Tell successor of new node to update it's predecessor
+			msg[0] = '\0';
 			sprintf(msg,"%c",(char)(node_id[add_node.predecessor]+offset));
-			// printf("node_id[p]: %d\n", node_id[p]);
 			strcpy(&(msg[1]), "up");
 			sprintf(&(msg[3]),"%d",p);
 			printf("join:%s\n", msg);
 			unicast_send(msg);
-
 		}
 
 
@@ -478,9 +530,7 @@ void *stdin_client(void *arg){
 		// 	printf("Quitting stdin thread...\n");
 		// 	break;
 		// }
-
 	}
-
 	pthread_exit(NULL);	
 }
 
