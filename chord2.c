@@ -45,7 +45,8 @@ int sockets[PROC_COUNT];
 /* State variable & Flags */
 bool server_created = false;
 bool used_pid[PROC_COUNT] = {false};
-int node_id[256];
+int node_id[256];	// array of ids in chord network; entry corresponds to line number in config file
+int port_nums[256];
 
 /* Multicast Buffer */
 char mc_buf[1024];
@@ -357,6 +358,7 @@ void * thread_create_client(void * cl_info){
 		printf("Client: Received: '%s'\n",buf);
 
 		if(buf[0] == 'j'){
+			// Join Self to Chord Network
 			memcpy(&my_node, &buf[1], sizeof(Node));
 			my_node.keys[my_node.nodeId] = true;
 			printf("my_node.node_id = %d\n", my_node.nodeId);
@@ -366,6 +368,42 @@ void * thread_create_client(void * cl_info){
 				printf("my_node.finger[%d] = %d\n",i,my_node.fingerTable[i]);
 			for(int i = 0; i < 256; i++)
 				printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
+
+			// Send port number back to Client
+
+
+		}
+		else if(buf[0] == 'u' && buf[1] == 'p'){
+			// Update Predecessor
+			printf("BEFORE UPDATE:\n");
+			printf("my_node.node_id = %d\n", my_node.nodeId);
+			printf("my_node.predecessor = %d\n", my_node.predecessor);
+			printf("my_node.successor = %d\n", my_node.successor);
+			int new_pred = atoi(&buf[2]);
+			my_node.predecessor = new_pred;
+
+			printf("AFTER UPDATE:\n");
+			printf("my_node.node_id = %d\n", my_node.nodeId);
+			printf("my_node.predecessor = %d\n", my_node.predecessor);
+			printf("my_node.successor = %d\n", my_node.successor);
+		}
+		else if(buf[0] == 'u' && buf[1] == 'k'){
+			// Update Keys
+			printf("BEFORE UPDATE [KEYS]:\n");
+			printf("my_node.node_id = %d\n", my_node.nodeId);
+			for(int i = 0; i < 256; i++)
+				printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
+			int new_nodeID = atoi(&buf[2]);
+			int i = (my_node.predecessor + 1)%256;
+			while(i != (new_nodeID + 1)%256 ){
+				my_node.keys[i] = false;
+				i = (i+1)%256;
+			}
+			printf("AFTER UPDATE [KEYS]:\n");
+			printf("my_node.node_id = %d\n", my_node.nodeId);
+			for(int i = 0; i < 256; i++)
+				printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
+
 		}
 		
 
@@ -474,15 +512,12 @@ Node init_finger_table(int new_id){
 			add_node.keys[i] = false;
 	}
 
-
-	// for(int i = add_node.predecessor+1; i <= add_node.nodeId; i++)
-	// 	add_node.keys[i] = true;
-
 	return add_node;
 }
 
 /* Thread for taking inputs and multicasting */
-void *stdin_client(void *arg){
+void *stdin_client(void * cinfo){
+	struct Config_info *data = (struct Config_info *) cinfo;
 	while(1){
 		// Store inputs in buffer
 		char input[MAXDATASIZE];
@@ -491,28 +526,27 @@ void *stdin_client(void *arg){
 
 		if(input[0] == 'j'){ // join op
 			int p = atoi(&input[5]);
-			int unused_idx;
 			for(int x = 0; x < PROC_COUNT; x++){
 				if(used_pid[x] == false){
 					used_pid[x] = true;
-					unused_idx = x;
 					node_id[p] = x;
+					port_nums[p] = data->ports[x];
 					break;
 				}
 			}
 
 			for(int i = 0; i < 256; i++)
-				printf("node_id{%d] : %d\n", i, node_id[i]);
+				printf("node_id[%d] : %d\n", i, node_id[i]);
 
 			/* Initialize finger table for new node */
 			Node add_node = init_finger_table(p);
 			printf("add_node.node_id = %d\n", add_node.nodeId);
 			printf("add_node.predecessor = %d\n", add_node.predecessor);
 			printf("add_node.successor = %d\n", add_node.successor);
-			for(int i = 0; i < NUMBER_OF_BITS; i++)
-				printf("add_node.fingerTable[%d] = %d\n",i,add_node.fingerTable[i]);
-			for(int i = 0; i < 256; i++)
-				printf("add_node.keys[%d] = %d\n",i,add_node.keys[i]);
+			// for(int i = 0; i < NUMBER_OF_BITS; i++)
+			// 	printf("add_node.fingerTable[%d] = %d\n",i,add_node.fingerTable[i]);
+			// for(int i = 0; i < 256; i++)
+			// 	printf("add_node.keys[%d] = %d\n",i,add_node.keys[i]);
 			
 			// Send Struct to new node
 			char *msg = malloc(sizeof(Node)+3);
@@ -525,18 +559,30 @@ void *stdin_client(void *arg){
 				perror("send");
 			}
 			
-			// Tell successor of new node to update it's predecessor
+			// Tell Successor of new node to update keys
+			// (successor should set to false [successor.predecessor+1, new_id])
 			msg[0] = '\0';
-			sprintf(msg,"%c",(char)(node_id[add_node.predecessor]+offset));
-			strcpy(&(msg[1]), "up");
-			sprintf(&(msg[3]),"%d",p);
-			printf("join:%s\n", msg);
+			sprintf(msg,"%c",(char)(node_id[add_node.successor]+offset));
+			strcpy(&(msg[1]), "uk");
+			sprintf(&(msg[3]),"%d",(p));
 			unicast_send(msg);
 
-			// Tell other nodes to update their keys
-
+			// Tell successor of new node to update it's predecessor
+			msg[0] = '\0';
+			sprintf(msg,"%c",(char)(node_id[add_node.successor]+offset));
+			strcpy(&(msg[1]), "up");
+			sprintf(&(msg[3]),"%d",p);
+			// strcat(msg," "); 			// space to separate two numbers in buffer
+			// strcat(msg,(char));
+			unicast_send(msg);
 
 			// Tell other nodes to update their finger tables
+			// msg[0] = '\0';
+			// sprintf(msg,"%c","n"); // 'n' used to notify clients of new node
+
+			// // need to send new node's ID, and it's socket Descriptor,i.e., node_id entry
+			// sprintf(msg,"%c",(char)(node_id[add_node.predecessor]+offset));
+			
 		}
 
 
@@ -717,6 +763,7 @@ int main(int argc, char *argv[])
 		node_id[i] = -1;
 	}
 	node_id[0] = 0;
+	port_nums[0] = 3490;
 
 
 	struct Client_info *cl_info;
@@ -727,7 +774,7 @@ int main(int argc, char *argv[])
 			cl_info->ip_addr = sep_ips[x];
 			pthread_create(&proc_client[x], NULL, thread_create_client, (void*)cl_info);
 		}
-		pthread_create(&stdin_thread, NULL, stdin_client, NULL);
+		pthread_create(&stdin_thread, NULL, stdin_client, cinfo);
 	}
 	else{
 		// Only connect to Node 0
