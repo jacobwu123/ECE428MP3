@@ -98,6 +98,8 @@ int serialize(const Node* add_node, char* msg){
     bytes += sizeof(add_node->successor);
     memcpy(msg +bytes, &(add_node->fingerTable), sizeof(add_node->fingerTable));
     bytes += sizeof(add_node->fingerTable);
+    memcpy(msg +bytes, &(add_node->fingerTablePorts), sizeof(add_node->fingerTablePorts));
+    bytes += sizeof(add_node->fingerTablePorts);
     memcpy(msg + bytes , &(add_node->keys), sizeof(add_node->keys));
     bytes +=  sizeof(add_node->keys);
     return bytes;
@@ -365,9 +367,18 @@ void * thread_create_client(void * cl_info){
 			printf("my_node.predecessor = %d\n", my_node.predecessor);
 			printf("my_node.successor = %d\n", my_node.successor);
 			for(int i = 0; i < NUMBER_OF_BITS; i++)
-				printf("my_node.finger[%d] = %d\n",i,my_node.fingerTable[i]);
-			for(int i = 0; i < 256; i++)
-				printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
+				printf("my_node.fingerTable[%d] = %d\n",i,my_node.fingerTable[i]);
+			for(int i = 0; i < NUMBER_OF_BITS; i++)
+				printf("my_node.fingerTablePorts[%d] = %d\n",i,my_node.fingerTablePorts[i]);
+			// for(int i = 0; i < 256; i++)
+			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
+
+			// Connect to Nodes in Finger Table
+			// for(int i = 0; i < NUMBER_OF_BITS; i++){
+			// 	int t_port = my_node.fingerTablePorts[i];
+
+			// }
+
 
 			// Send port number back to Client
 
@@ -389,20 +400,20 @@ void * thread_create_client(void * cl_info){
 		}
 		else if(buf[0] == 'u' && buf[1] == 'k'){
 			// Update Keys
-			printf("BEFORE UPDATE [KEYS]:\n");
-			printf("my_node.node_id = %d\n", my_node.nodeId);
-			for(int i = 0; i < 256; i++)
-				printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
+			// printf("BEFORE UPDATE [KEYS]:\n");
+			// printf("my_node.node_id = %d\n", my_node.nodeId);
+			// for(int i = 0; i < 256; i++)
+			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
 			int new_nodeID = atoi(&buf[2]);
 			int i = (my_node.predecessor + 1)%256;
 			while(i != (new_nodeID + 1)%256 ){
 				my_node.keys[i] = false;
 				i = (i+1)%256;
 			}
-			printf("AFTER UPDATE [KEYS]:\n");
-			printf("my_node.node_id = %d\n", my_node.nodeId);
-			for(int i = 0; i < 256; i++)
-				printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
+			// printf("AFTER UPDATE [KEYS]:\n");
+			// printf("my_node.node_id = %d\n", my_node.nodeId);
+			// for(int i = 0; i < 256; i++)
+			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
 
 		}
 		
@@ -518,6 +529,7 @@ Node init_finger_table(int new_id){
 /* Thread for taking inputs and multicasting */
 void *stdin_client(void * cinfo){
 	struct Config_info *data = (struct Config_info *) cinfo;
+
 	while(1){
 		// Store inputs in buffer
 		char input[MAXDATASIZE];
@@ -526,6 +538,8 @@ void *stdin_client(void * cinfo){
 
 		if(input[0] == 'j'){ // join op
 			int p = atoi(&input[5]);
+
+			// In node_id array, index is new PID, entry at index is line in config file
 			for(int x = 0; x < PROC_COUNT; x++){
 				if(used_pid[x] == false){
 					used_pid[x] = true;
@@ -543,11 +557,16 @@ void *stdin_client(void * cinfo){
 			printf("add_node.node_id = %d\n", add_node.nodeId);
 			printf("add_node.predecessor = %d\n", add_node.predecessor);
 			printf("add_node.successor = %d\n", add_node.successor);
-			// for(int i = 0; i < NUMBER_OF_BITS; i++)
-			// 	printf("add_node.fingerTable[%d] = %d\n",i,add_node.fingerTable[i]);
-			// for(int i = 0; i < 256; i++)
-			// 	printf("add_node.keys[%d] = %d\n",i,add_node.keys[i]);
 			
+			/* For loop to aid in finger table ports initialization */
+			/* NOTE: this is the table used in place of IP Addresses */
+			for(int i = 0; i < NUMBER_OF_BITS; i++){
+				int finger_id = add_node.fingerTable[i];
+				add_node.fingerTablePorts[i] = port_nums[finger_id];
+				// add_node.fingerTablePorts[i] = data->ports[finger_id];
+			}
+
+
 			// Send Struct to new node
 			char *msg = malloc(sizeof(Node)+3);
 			sprintf(msg,"%c",(char)(node_id[p]+offset));

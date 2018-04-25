@@ -10,6 +10,7 @@ typedef struct{
 	int successor;
 
 	int fingerTable[NUMBER_OF_BITS];
+	int fingerTablePorts[NUMBER_OF_BITS];
 	bool keys[256];
 
 }Node;
