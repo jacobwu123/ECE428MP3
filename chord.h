@@ -6,7 +6,10 @@
 
 typedef struct{
 	int nodeId;
+	
 	int predecessor;
+	int predecessorPort;
+
 	int successor;
 
 	int fingerTable[NUMBER_OF_BITS];
