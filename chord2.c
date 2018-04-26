@@ -154,11 +154,8 @@ void *multicast(void* arg){
 	pthread_exit((void *)0);
 }
 
-/* Set up connection to Predecessor and send message */
-void sendToPredecessor(void * arg){
-	char *msg = (char *) arg;
-	printf("SENDING TO PREDECESSOR...\n");
-
+int connectToPredecessor(){
+	printf("Connecting to Predecessor...\n");
 	int sockfd, numbytes;  
 	char buf[MAXDATASIZE];
 	struct addrinfo hints, *servinfo, *p;
@@ -193,18 +190,63 @@ void sendToPredecessor(void * arg){
 		break;
 	}
 
-	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
-			s, sizeof s);
-	printf("client: connecting to %s\n", s);
-
 	freeaddrinfo(servinfo); // all done with this structure
+	printf("Connected to Predecessor.\n");
+	return sockfd;
+}
 
+/* Set up connection to Predecessor and send message */
+void sendToPredecessor(void * arg){
+	char *msg = (char *) arg;
+	printf("SENDING TO PREDECESSOR...\n");
+
+	// int sockfd, numbytes;  
+	// char buf[MAXDATASIZE];
+	// struct addrinfo hints, *servinfo, *p;
+	// int rv;
+	// char s[INET6_ADDRSTRLEN];
+
+	// memset(&hints, 0, sizeof hints);
+	// hints.ai_family = AF_UNSPEC;
+	// hints.ai_socktype = SOCK_STREAM;
+
+	// char connection_port[PORT_LEN];
+	// sprintf(connection_port, "%d",my_node.predecessorPort);
+
+	// if ((rv = getaddrinfo("127.0.0.1", connection_port, &hints, &servinfo)) != 0) {
+	// 	fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+	// 	pthread_exit(NULL);
+	// }
+
+	// // Loop through all the results and connect to the first we can
+	// for(p = servinfo; p != NULL; p = p->ai_next) {
+	// 	if ((sockfd = socket(p->ai_family, p->ai_socktype,
+	// 			p->ai_protocol)) == -1) {
+	// 		perror("client: socket");
+	// 		continue;
+	// 	}
+
+	// 	if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+	// 		//perror("client: connect");
+	// 		close(sockfd);
+	// 		continue;
+	// 	}
+	// 	break;
+	// }
+
+	// inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
+	// 		s, sizeof s);
+	// printf("client: connecting to %s\n", s);
+
+	// freeaddrinfo(servinfo); // all done with this structure
+
+	// pred_sd = connectToPredecessor();
 	printf("Client to Server (uf): %s\n", msg);
-	if (send(sockfd, msg, MAXDATASIZE, 0) == -1){
+	if (send(pred_sd, msg, MAXDATASIZE, 0) == -1){
 				perror("send");
 	}
 
-	close(sockfd);
+	//close(sockfd);
 	return;
 }
 
@@ -491,7 +533,7 @@ void * thread_create_client(void * cl_info){
 				printf("my_node.fingerTablePorts[%d] = %d\n",i,my_node.fingerTablePorts[i]);
 			// for(int i = 0; i < 256; i++)
 			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
-
+			pred_sd = connectToPredecessor();
 		}
 		else if(buf[0] == 'u' && buf[1] == 'p'){
 			// Update Predecessor
@@ -509,11 +551,20 @@ void * thread_create_client(void * cl_info){
 			if(isdigit(*str))
 				my_node.predecessorPort = (int) strtol(str, &str, BASE_TEN);
 
+			
+			if(my_node.nodeId != 0){
+				if(close(pred_sd))
+					printf("CLOSE ERROR.\n");
+				pred_sd = connectToPredecessor();
+			}
+			else{
+				pred_sd = serv_sockets[node_id[my_node.predecessor]];
 			// printf("AFTER UPDATE [PREDECESSOR]:\n");
 			// printf("my_node.node_id = %d\n", my_node.nodeId);
 			// printf("my_node.predecessor = %d\n", my_node.predecessor);
 			// printf("my_node.predecessorPort = %d\n", my_node.predecessorPort);
 			// printf("my_node.successor = %d\n", my_node.successor);
+			}
 		}
 		else if(buf[0] == 'u' && buf[1] == 'k'){
 			// Update Keys
@@ -751,7 +802,6 @@ void *stdin_client(void * cinfo){
 					break;
 				}
 			}
-
 			// for(int i = 0; i < 256; i++)
 			// 	printf("node_id[%d] : %d\n", i, node_id[i]);
 
@@ -772,7 +822,6 @@ void *stdin_client(void * cinfo){
 				// add_node.fingerTablePorts[i] = data->ports[finger_id];
 			}
 
-
 			// Send Struct to new node
 			char *msg = malloc(sizeof(Node)+3);
 			sprintf(msg,"%c",(char)(node_id[p]+offset));
@@ -783,7 +832,7 @@ void *stdin_client(void * cinfo){
 			if (send(serv_sockets[node_id[p]], msg, sizeof(Node)+1, 0) == -1){
 				perror("send");
 			}
-			
+
 			// Tell Successor of new node to update keys
 			// (successor should set to false [successor.predecessor+1, new_id])
 			msg[0] = '\0';
@@ -1032,17 +1081,17 @@ int main(int argc, char *argv[])
 	while(!server_created);
 
 	// Initialize global Node struct
-	my_node.nodeId = my_pid;
-	my_node.predecessor = my_pid;
-	my_node.successor = my_pid;
-	my_node.fingerTable[0] = my_pid;
-	my_node.fingerTable[1] = my_pid;
-	my_node.fingerTable[2] = my_pid;
-	my_node.fingerTable[3] = my_pid;
-	my_node.fingerTable[4] = my_pid;
-	my_node.fingerTable[5] = my_pid;
-	my_node.fingerTable[6] = my_pid;
-	my_node.fingerTable[7] = my_pid;
+	my_node.nodeId = 0;
+	my_node.predecessor = 0;
+	my_node.successor = 0;
+	my_node.fingerTable[0] = 0;
+	my_node.fingerTable[1] = 0;
+	my_node.fingerTable[2] = 0;
+	my_node.fingerTable[3] = 0;
+	my_node.fingerTable[4] = 0;
+	my_node.fingerTable[5] = 0;
+	my_node.fingerTable[6] = 0;
+	my_node.fingerTable[7] = 0;
 
 	// Initialize boolean array of keys
 	if(my_pid == 0){
