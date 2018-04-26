@@ -492,9 +492,6 @@ void * thread_create_client(void * cl_info){
 			// for(int i = 0; i < 256; i++)
 			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
 
-
-			// Notify Nodes in Network to update (per Pg.6 of chord_sigcomm.pdf)
-
 		}
 		else if(buf[0] == 'u' && buf[1] == 'p'){
 			// Update Predecessor
@@ -580,6 +577,18 @@ void * thread_create_client(void * cl_info){
 
 		}
 		else if(strcmp(buf,"show") == 0){
+			char *msg = malloc(sizeof(Node)+1);
+			int len = serialize(&my_node, msg);
+			msg[len] = '\0';
+			// sleep(min_delay + rand()%(max_delay+1 -min_delay));
+			if (send(sockfd, msg, sizeof(Node)+1, 0) == -1){
+				perror("send");
+			}
+
+			free(msg);
+
+		}
+		else if(strcmp(buf,"crash") == 0){
 			char *msg = malloc(sizeof(Node)+1);
 			int len = serialize(&my_node, msg);
 			msg[len] = '\0';
@@ -698,8 +707,20 @@ Node init_finger_table(int new_id){
 	}
 
 	/* Key Distribution for new node */
+	// Find index from which to start transferring keys
+	int key_start_idx = add_node.predecessor+1;
+
+	// This loop finds the index of a recent crash most immediately before its own ID
+	//  (i.e., the index of what would have been the predecessor if the failed node had not crashed)
+	for(int i = add_node.nodeId-1; i >= add_node.predecessor+1; i--){
+		if(node_id[i] == -2){
+			key_start_idx = i+1;
+			break;
+		}
+	}
+
 	for(int i = 0; i < 256; i++){
-		if(i >= add_node.predecessor+1 && i <= add_node.nodeId )
+		if(i >= key_start_idx && i <= add_node.nodeId )
 			add_node.keys[i] = true;
 		else
 			add_node.keys[i] = false;
@@ -837,11 +858,11 @@ void *stdin_client(void * cinfo){
 			free(msg);
 		}
 		else if(input[0] == 's' && input[5] == 'a'){
-			//show all
+			// Show all (request information from all nodes in Chord Network)
 
 		}
 		else if(input[0] == 's'){
-			//show p
+			// Show p (request information from node p in Chord Network)
 
 			// Check if p is in Chord Network
 			int req_node = atoi(&input[5]);
@@ -853,29 +874,28 @@ void *stdin_client(void * cinfo){
 			// If p is in Chord Network, request Node information
 			expecting_show = true;
 			int req_sd = node_id[req_node];
-			int numbytes;
 			if (send(serv_sockets[req_sd], "show", 5, 0) == -1){
 				perror("send");
 			}
+		}
+		else if(input[0] == 'c'){
+			// Crash operation
+			int p = atoi(&input[6]);
 
-			
+			// Check if Node p is in Chord Network
+			if(node_id[p] == -1){
+				printf("%d does not exist.\n", p);
+				continue;
+			}
 
+			// Set node status to crashed
+			node_id[p] = -2;
 
-			// Set up Multicast buffer
-			// mc_buf[0] = '\0';
-			// strcat(mc_buf, input);
-			// pthread_t mcast_me;
-			// int rc = pthread_create(&mcast_me, NULL, multicast, (void*)mc_buf);
-			// if(rc){
-			// 	printf("ERROR W/ THREAD FOR SERVER CREATION.\n");
-			// 	exit(-1);
-			// }
-
-			// // Exit STDIN Thread
-			// if(strcmp(input, "quit") == 0){
-			// 	printf("Quitting stdin thread...\n");
-			// 	break;
-			// }
+			// Send message to Node p to crash
+			int p_sd = node_id[p];
+			if (send(serv_sockets[p_sd], "crash", 5, 0) == -1){
+				perror("send");
+			}
 		}
 	}
 	pthread_exit(NULL);	
