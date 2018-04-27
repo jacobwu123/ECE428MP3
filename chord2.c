@@ -53,7 +53,7 @@ int port_nums[256];
 bool expecting_show = false;
 bool start_hbeat = false;
 bool received_ack = false;
-
+bool c_keys[256];
 /* Multicast Buffer */
 char mc_buf[1024];
 
@@ -210,7 +210,7 @@ void sendToPredecessor(void * arg){
 				perror("send");
 	}
 
-	printf("<3 SENT HEART-- From %d to %d\n", my_node.nodeId, my_node.predecessor);
+	// printf("<3 SENT HEART-- From %d to %d\n", my_node.nodeId, my_node.predecessor);
 	close(sockfd);
 	return;
 }
@@ -255,7 +255,7 @@ void sendToSuccessor(void * arg){
 
 	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
 			s, sizeof s);
-	printf("client: connecting to %s\n", s);
+	// printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
 
@@ -362,7 +362,7 @@ void sendHeartAck(int port_ack){
 
 	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
 			s, sizeof s);
-	printf("client: connecting to %s\n", s);
+	// printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
 
@@ -385,13 +385,13 @@ void * heartbeat(void* arg){
 			pthread_mutex_unlock(&heartbeat_mutex);
 			t_hport[0] = 'h';
 			strcat(t_hport,my_port); 			// message is hPORT#
-			// printf("SENDING THIS TO PRED: t_port: %s\n",t_hport );
 			sendToPredecessor(t_hport);
 			memset(t_hport,'\0',sizeof(t_hport));
 			sleep(3);
 			if(received_ack){
 				printf("<3<3<3 Received Ack\n");
 				received_ack = false;
+				fault_tol = 0;
 			}
 			else{
 				printf("****-------DID NOT RECEIVE ACK!!!!!!!!!!!!--------****\n\n");
@@ -433,7 +433,6 @@ void * heartbeat(void* arg){
 		
 	}
 
-	// printf("--285 HAS BEEN CLOSED--\n");
 	pthread_exit(NULL);
 }
 
@@ -502,7 +501,7 @@ void * handle_connection(void* sd){
 			pthread_mutex_lock(&heartbeat_mutex);
 			if(start_hbeat || my_node.nodeId == 0){
 				sendHeartAck(heartPort);
-				printf("Sent Ack from %d\n",my_node.nodeId);
+				// printf("Sent Ack from %d\n",my_node.nodeId);
 			}
 			pthread_mutex_unlock(&heartbeat_mutex);
 			
@@ -526,14 +525,6 @@ void * handle_connection(void* sd){
 			str++;
 			if(isdigit(*str))
 				succ_port = (int)strtol(str, &str, BASE_TEN);
-
-			// // Iterate through finger table
-			// for(int i = 0; i < NUMBER_OF_BITS; i++){
-			// 	if(my_node.fingerTable[i] == crashed_ID){
-			// 		my_node.fingerTable[i] = crashed_succ;
-			// 		my_node.fingerTablePorts[i] = succ_port;
-			// 	}
-			// }
 
 			printf("Crashed ID:%d, Successor:%d, Successor Port:%d\n", crashed_ID,crashed_succ,succ_port);
 
@@ -597,20 +588,13 @@ void * handle_connection(void* sd){
 				my_node.predecessorPort = pred_port;
 				stabilization = false;
 				fault_tol = 0;
-				printf("*********************************************************DONE WITH STABILIZATION\n\n\n\n");
+				printf("***************************DONE WITH STABILIZATION\n\n\n\n");
 
 		}
-
-
-
-		// printf("-- Messages counter: %d  --\n", messages_counter);
-		// printf("r_count: %d\nread_op: %d\n", r_count, read_op);
-		// printf("w_count: %d\nwrite_op: %d\n", w_count, write_op);
 
 	}
 
 	close(new_fd);
-	// printf("--360 HAS BEEN CLOSED--\n");
 	pthread_exit(NULL);
 }
 
@@ -795,20 +779,19 @@ void * thread_create_client(void * cl_info){
 
 	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
 			s, sizeof s);
-	printf("client: connecting to %s\n", s);
+	// printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
 
 	while(((numbytes = recv(sockfd, buf, MAXDATASIZE, 0)) > 0))
 	{
 		buf[numbytes] = '\0';
-		printf("Client: Received: '%s'\n",buf);
+		// printf("Client: Received: '%s'\n",buf);
 
 		if(buf[0] == 'j'){
 			// Join Self to Chord Network
 			printf("-- Joining Chord Network...\n\n");
 			memcpy(&my_node, &buf[1], sizeof(Node));
-			my_node.keys[my_node.nodeId] = true;
 			printf("my_node.node_id = %d\n", my_node.nodeId);
 			printf("my_node.predecessor = %d\n", my_node.predecessor);
 			printf("my_node.predecessorPort = %d\n", my_node.predecessorPort);
@@ -819,12 +802,6 @@ void * thread_create_client(void * cl_info){
 				printf("my_node.fingerTablePorts[%d] = %d\n",i,my_node.fingerTablePorts[i]);
 			// for(int i = 0; i < 256; i++)
 			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
-			
-
-			// if(my_node.predecessor == 0)
-			// 	start_hbeat = false;
-			// else
-			// 	start_hbeat = true;
 
 			pthread_mutex_lock(&heartbeat_mutex);	
 			start_hbeat = true;
@@ -846,14 +823,6 @@ void * thread_create_client(void * cl_info){
 			str++;
 			if(isdigit(*str))
 				my_node.predecessorPort = (int) strtol(str, &str, BASE_TEN);
-
-
-			// if(my_node.predecessor == 0)
-			// 	start_hbeat = false;
-			// else
-			// 	start_hbeat = true;
-
-			// start_hbeat = true;
 
 			// printf("AFTER UPDATE [PREDECESSOR]:\n");
 			// printf("my_node.node_id = %d\n", my_node.nodeId);
@@ -912,6 +881,8 @@ void * thread_create_client(void * cl_info){
 		}
 		else if(buf[0] == 's' && buf[5] == 'a'){
 
+			//	TODO
+
 		}
 		else if(strcmp(buf,"show") == 0){
 			char *msg = malloc(sizeof(Node)+1);
@@ -926,7 +897,7 @@ void * thread_create_client(void * cl_info){
 
 		}
 		else if(strcmp(buf,"crash") == 0){
-			printf("RECEIVED CRASH\n");
+			// printf("RECEIVED CRASH\n");
 			pthread_mutex_lock(&heartbeat_mutex);
 			start_hbeat = false;
 			pthread_mutex_unlock(&heartbeat_mutex);
@@ -950,33 +921,7 @@ void * thread_create_client(void * cl_info){
 	pthread_exit(NULL);
 }
 
-// /* Thread to keep multicasting when Multicast buffer has message */
-// void * thread_mcast(void* m){
-// 	char * mcast_msg = (char *)m;
-// 	char * temp_msg = malloc(strlen(mcast_msg) * sizeof(char));
-// 	strcpy(temp_msg, mcast_msg);
-// 	multicast(temp_msg);
-// 	pthread_exit(NULL);
-// }
-// int closest_preceding_finger(int id){
-
-// }
-
-// int find_predecessor(int id){
-// 	int n_prime = my_node.nodeId;
-// 	int successor = ;
-// 	//find 
-// 	while(id < n_prime || id > successor){
-// 		n_prime = closest_preceding_finger(id);
-// 	}
-// 	return n_prime;
-// }
-
-// int find_successor(int id){
-// 	int predecessor = find_predecessor(id);
-
-// }
-
+/* Function to help instantiate the finger table of a joining Node */
 Node init_finger_table(int new_id){
 	Node add_node;
 	add_node.nodeId = new_id;
@@ -1041,25 +986,12 @@ Node init_finger_table(int new_id){
 	}
 
 	/* Key Distribution for new node */
-	// Find index from which to start transferring keys
-	int key_start_idx = add_node.predecessor+1;
-
-	// This loop finds the index of a recent crash most immediately before its own ID
-	//  (i.e., the index of what would have been the predecessor if the failed node had not crashed)
-	for(int i = add_node.nodeId-1; i >= add_node.predecessor+1; i--){
-		if(node_id[i] == -2){
-			key_start_idx = i+1;
-			break;
-		}
-	}
-
 	for(int i = 0; i < 256; i++){
-		if(i >= key_start_idx && i <= add_node.nodeId )
-			add_node.keys[i] = true;
+		if(i > add_node.predecessor && i <= add_node.nodeId )
+			add_node.keys[i] = c_keys[i];
 		else
 			add_node.keys[i] = false;
 	}
-
 	return add_node;
 }
 
@@ -1110,9 +1042,9 @@ void *stdin_client(void * cinfo){
 			sprintf(msg,"%c",(char)(node_id[p]+offset));
 			msg[0] = 'j';
 			int len = serialize(&add_node, &msg[1]);
-			msg[len] = '\0';
+			msg[len+1] = '\0';
 			sleep(min_delay + rand()%(max_delay+1 -min_delay));
-			if (send(serv_sockets[node_id[p]], msg, sizeof(Node)+1, 0) == -1){
+			if (send(serv_sockets[node_id[p]], msg, sizeof(Node)+2, 0) == -1){
 				perror("send");
 			}
 
@@ -1162,7 +1094,6 @@ void *stdin_client(void * cinfo){
 					}
 				}
 
-				// printf("nnew_pred:%d\n", nnew_pred);
 				// Do not send update finger table message to new node
 				// because it already has updated finger table
 				if(nnew_pred == p)
@@ -1194,6 +1125,8 @@ void *stdin_client(void * cinfo){
 		}
 		else if(input[0] == 's' && input[5] == 'a'){
 			// Show all (request information from all nodes in Chord Network)
+
+			// TODO
 
 		}
 		else if(input[0] == 's'){
@@ -1230,9 +1163,18 @@ void *stdin_client(void * cinfo){
 			}
 
 			// Set node status to crashed
-			node_id[p] = -2;
+			node_id[p] = -1;
 			// Set node to unused
 			used_pid[p] = false;
+
+			// Update global keys
+			for(int i = p; i > 0; i--){
+				if(node_id[i] >= 0)
+					break;
+				else
+					c_keys[i] = false;
+			}
+
 		}
 	}
 	pthread_exit(NULL);	
@@ -1389,6 +1331,9 @@ int main(int argc, char *argv[])
 	else
 		for(int x = 0; x < 256; x++)
 			my_node.keys[x] = false;
+
+	for(int i = 0; i < 256; i++)
+		c_keys[i] = true;
 
 	// Used_pid array initialization (i.e., everyone connected to Node 0)
 	used_pid[0] = true;
