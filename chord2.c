@@ -214,10 +214,117 @@ void sendToPredecessor(void * arg){
 	close(sockfd);
 	return;
 }
-
 /* Set up connection to Successor and send message */
+void sendToSuccessor(void * arg){
+	char *msg = (char *) arg;
+	printf("SENDING TO SUCCESSOR...\n");
+
+	int sockfd, numbytes;  
+	char buf[MAXDATASIZE];
+	struct addrinfo hints, *servinfo, *p;
+	int rv;
+	char s[INET6_ADDRSTRLEN];
+
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	char connection_port[PORT_LEN];
+	sprintf(connection_port, "%d",my_node.fingerTablePorts[0]);
+
+	if ((rv = getaddrinfo("127.0.0.1", connection_port, &hints, &servinfo)) != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		pthread_exit(NULL);
+	}
+
+	// Loop through all the results and connect to the first we can
+	for(p = servinfo; p != NULL; p = p->ai_next) {
+		if ((sockfd = socket(p->ai_family, p->ai_socktype,
+				p->ai_protocol)) == -1) {
+			perror("client: socket");
+			continue;
+		}
+
+		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			//perror("client: connect");
+			close(sockfd);
+			continue;
+		}
+		break;
+	}
+
+	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
+			s, sizeof s);
+	printf("client: connecting to %s\n", s);
+
+	freeaddrinfo(servinfo); // all done with this structure
+
+	// printf("Client to Server (uf): %s\n", msg);
+	if (send(sockfd, msg, MAXDATASIZE, 0) == -1){
+				perror("send");
+	}
+
+	printf("\nSTABILIZATION FORWARD Msg: '%s'\n From %d to %d\n\n", msg, my_node.nodeId, my_node.fingerTable[0]);
+	close(sockfd);
+	return;
+}
+
+
+/* Set up Ack back for Heartbeat Crash Detection */
+void stabilization_helper(void * arg,int port_ack){
+	char * msg = (char*) arg;
+	int sockfd, numbytes;  
+	char buf[MAXDATASIZE];
+	struct addrinfo hints, *servinfo, *p;
+	int rv;
+	char s[INET6_ADDRSTRLEN];
+
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	char connection_port[PORT_LEN];
+	sprintf(connection_port, "%d",port_ack);
+
+	if ((rv = getaddrinfo("127.0.0.1", connection_port, &hints, &servinfo)) != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		pthread_exit(NULL);
+	}
+
+	// Loop through all the results and connect to the first we can
+	for(p = servinfo; p != NULL; p = p->ai_next) {
+		if ((sockfd = socket(p->ai_family, p->ai_socktype,
+				p->ai_protocol)) == -1) {
+			perror("client: socket");
+			continue;
+		}
+
+		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			//perror("client: connect");
+			close(sockfd);
+			continue;
+		}
+		break;
+	}
+
+	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
+			s, sizeof s);
+	// printf("client: connecting to %s\n", s);
+
+	freeaddrinfo(servinfo); // all done with this structure
+
+	if (send(sockfd, msg, MAXDATASIZE, 0) == -1){
+				perror("send");
+	}
+	printf("________________SENT FINAL MESSAGE___________!!!!!!!!!!!!!!\n");
+	// printf("SENT YES-- From %d to port:%d\n", my_node.nodeId, port_ack);
+	close(sockfd);
+	return;
+}
+
+/* Set up Ack back for Heartbeat Crash Detection */
 void sendHeartAck(int port_ack){
-	printf("SENDING ACK TO HEART...\n");
+	// printf("SENDING ACK TO HEART...\n");
 
 	int sockfd, numbytes;  
 	char buf[MAXDATASIZE];
@@ -267,7 +374,8 @@ void sendHeartAck(int port_ack){
 	close(sockfd);
 	return;
 }
-
+bool stabilization = false;
+int fault_tol = 0;
 /* Thread to handle receiving messages from remote clients to local server */
 void * heartbeat(void* arg){
 	while(1){
@@ -287,6 +395,35 @@ void * heartbeat(void* arg){
 			}
 			else{
 				printf("****-------DID NOT RECEIVE ACK!!!!!!!!!!!!--------****\n\n");
+				fault_tol ++;
+				if(fault_tol == 5 && !stabilization){
+					//1. send notice msg to successor.
+					//2. in the message: x[pred id] [own nodeid] [own port num]
+					stabilization = true;
+
+					// Prepare message to propagate to all other nodes
+					char *msg = malloc(sizeof(char)*14);
+					msg[0] = 'x';
+					char temp_buf[5];
+					sprintf(temp_buf,"%d",my_node.predecessor);
+					strcat(msg,temp_buf);
+					strcat(msg," ");
+					sprintf(temp_buf,"%d",my_node.nodeId);
+					strcat(msg,temp_buf);
+					strcat(msg," ");
+					strcat(msg,my_port);
+					printf("STABILIZATION MESSAGE: %s\n",msg);
+					sendToSuccessor(msg);
+
+					// Check if need to modify own finger table
+					for(int i = 0; i < NUMBER_OF_BITS; i++){
+						if(my_node.fingerTable[i] == my_node.predecessor){
+							my_node.fingerTable[i] = my_node.nodeId;
+							my_node.fingerTablePorts[i] = atoi(my_port);
+						}
+					}
+				}
+				
 			}
 		}
 		else{
@@ -372,6 +509,96 @@ void * handle_connection(void* sd){
 		}
 		else if(strcmp(buf, "yes") == 0){
 			received_ack = true;
+		}
+		else if(buf[0]== 'x'){
+			// Stabilization Processes
+
+			// Recalculate finger Table
+			char *str = &buf[1];
+			int crashed_ID;
+			int crashed_succ;
+			int succ_port;
+			if(isdigit(*str))
+				crashed_ID = (int)strtol(str, &str, BASE_TEN);
+			str++;
+			if(isdigit(*str))
+				crashed_succ = (int)strtol(str, &str, BASE_TEN);
+			str++;
+			if(isdigit(*str))
+				succ_port = (int)strtol(str, &str, BASE_TEN);
+
+			// // Iterate through finger table
+			// for(int i = 0; i < NUMBER_OF_BITS; i++){
+			// 	if(my_node.fingerTable[i] == crashed_ID){
+			// 		my_node.fingerTable[i] = crashed_succ;
+			// 		my_node.fingerTablePorts[i] = succ_port;
+			// 	}
+			// }
+
+			printf("Crashed ID:%d, Successor:%d, Successor Port:%d\n", crashed_ID,crashed_succ,succ_port);
+
+
+			printf("MY_NODE.SUCCESSOR:%d, CRASHED_ID:%d\n", my_node.successor,crashed_ID);
+			// Check if at end of stabilization process
+			if(my_node.successor == crashed_ID){
+				// If current node is pred. of crashed node, then prepare
+				//   special message to update predecessor of succ. of crashed node
+				//    f[my_node.nodeID] [my_port]
+
+				// Update my successor to crashed node's successor
+				my_node.successor = crashed_succ;
+
+				// Send Message to new successor
+				char *msg = malloc(sizeof(char)*14);
+				msg[0] = 'f';
+				char temp_buf[5];
+				sprintf(temp_buf,"%d",my_node.nodeId);
+				strcat(msg,temp_buf);
+				strcat(msg," ");
+				strcat(msg,my_port);
+				printf("FINISHING MESSAGE: %s\n",msg);
+				// sendToSuccessor(msg);
+				// int t_port = atoi(my_port);
+				stabilization_helper(msg,succ_port);
+
+				// Iterate through finger table
+				for(int i = 0; i < NUMBER_OF_BITS; i++){
+					if(my_node.fingerTable[i] == crashed_ID){
+						my_node.fingerTable[i] = crashed_succ;
+						my_node.fingerTablePorts[i] = succ_port;
+					}
+				}
+
+			}
+			else{
+				// If not, then keep moving clockwise in Chord Network
+				sendToSuccessor(buf);
+				// Iterate through finger table
+				for(int i = 0; i < NUMBER_OF_BITS; i++){
+					if(my_node.fingerTable[i] == crashed_ID){
+						my_node.fingerTable[i] = crashed_succ;
+						my_node.fingerTablePorts[i] = succ_port;
+					}
+				}
+			}
+		}
+		else if(buf[0]== 'f'){
+				// Finished Stabilization Process
+				// Set predecessor and predecessor port
+				char *str = &buf[1];
+				int pred_ID;
+				int pred_port;
+				if(isdigit(*str))
+					pred_ID = (int)strtol(str, &str, BASE_TEN);
+				str++;
+				if(isdigit(*str))
+					pred_port = (int)strtol(str, &str, BASE_TEN);
+				my_node.predecessor = pred_ID;
+				my_node.predecessorPort = pred_port;
+				stabilization = false;
+				fault_tol = 0;
+				printf("*********************************************************DONE WITH STABILIZATION\n\n\n\n");
+
 		}
 
 
@@ -676,6 +903,7 @@ void * thread_create_client(void * cl_info){
 			if((c < a && a <= b)||(b<c && c < a) || (a <= b && b <c)){
 				my_node.fingerTable[i] = new_nodeID;
 				my_node.fingerTablePorts[i] = new_nodePort;
+				my_node.successor = my_node.fingerTable[0];
 				// Send same message to predecessor
 
 				if(new_nodeID != my_node.predecessor)
@@ -756,7 +984,7 @@ Node init_finger_table(int new_id){
 	int start = (new_id + 1)%256;
 	int i = start;
 
-	/* This loop is used to find succesor/predecessor of new node */
+	/* This loop is used to find successor/predecessor of new node */
 	bool forward = true;
 	while(1){
 
