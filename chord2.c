@@ -51,9 +51,15 @@ bool used_pid[PROC_COUNT] = {false};
 int node_id[256];	// array of ids in chord network; entry corresponds to line number in config file
 int port_nums[256];
 bool expecting_show = false;
+bool start_hbeat = false;
+bool received_ack = false;
 
 /* Multicast Buffer */
 char mc_buf[1024];
+
+/* Mutex */
+pthread_mutex_t heartbeat_mutex;
+
 
 /* Struct to pass to thread to create server */
 typedef struct Config_info{
@@ -199,14 +205,99 @@ void sendToPredecessor(void * arg){
 
 	freeaddrinfo(servinfo); // all done with this structure
 
-	// pred_sd = connectToPredecessor();
-	printf("Client to Server (uf): %s\n", msg);
+	// printf("Client to Server (uf): %s\n", msg);
 	if (send(sockfd, msg, MAXDATASIZE, 0) == -1){
 				perror("send");
 	}
 
+	printf("<3 SENT HEART-- From %d to %d\n", my_node.nodeId, my_node.predecessor);
 	close(sockfd);
 	return;
+}
+
+/* Set up connection to Successor and send message */
+void sendHeartAck(int port_ack){
+	printf("SENDING ACK TO HEART...\n");
+
+	int sockfd, numbytes;  
+	char buf[MAXDATASIZE];
+	struct addrinfo hints, *servinfo, *p;
+	int rv;
+	char s[INET6_ADDRSTRLEN];
+
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	char connection_port[PORT_LEN];
+	sprintf(connection_port, "%d",port_ack);
+
+	if ((rv = getaddrinfo("127.0.0.1", connection_port, &hints, &servinfo)) != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		pthread_exit(NULL);
+	}
+
+	// Loop through all the results and connect to the first we can
+	for(p = servinfo; p != NULL; p = p->ai_next) {
+		if ((sockfd = socket(p->ai_family, p->ai_socktype,
+				p->ai_protocol)) == -1) {
+			perror("client: socket");
+			continue;
+		}
+
+		if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			//perror("client: connect");
+			close(sockfd);
+			continue;
+		}
+		break;
+	}
+
+	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
+			s, sizeof s);
+	printf("client: connecting to %s\n", s);
+
+	freeaddrinfo(servinfo); // all done with this structure
+
+	if (send(sockfd, "yes", MAXDATASIZE, 0) == -1){
+				perror("send");
+	}
+
+	// printf("SENT YES-- From %d to port:%d\n", my_node.nodeId, port_ack);
+	close(sockfd);
+	return;
+}
+
+/* Thread to handle receiving messages from remote clients to local server */
+void * heartbeat(void* arg){
+	while(1){
+		char t_hport[8];
+		pthread_mutex_lock(&heartbeat_mutex);
+		if(start_hbeat){
+			pthread_mutex_unlock(&heartbeat_mutex);
+			t_hport[0] = 'h';
+			strcat(t_hport,my_port); 			// message is hPORT#
+			// printf("SENDING THIS TO PRED: t_port: %s\n",t_hport );
+			sendToPredecessor(t_hport);
+			memset(t_hport,'\0',sizeof(t_hport));
+			sleep(3);
+			if(received_ack){
+				printf("<3<3<3 Received Ack\n");
+				received_ack = false;
+			}
+			else{
+				printf("****-------DID NOT RECEIVE ACK!!!!!!!!!!!!--------****\n\n");
+			}
+		}
+		else{
+			// no send to predecessor
+			pthread_mutex_unlock(&heartbeat_mutex);
+		}
+		
+	}
+
+	// printf("--285 HAS BEEN CLOSED--\n");
+	pthread_exit(NULL);
 }
 
 /* Thread to handle receiving messages from remote clients to local server */
@@ -263,6 +354,25 @@ void * handle_connection(void* sd){
 					sendToPredecessor(buf);
 			}
 		}
+		else if(buf[0] == 'h' /*&& start_hbeat*/){
+			// Received Heart Request (i.e., probing to see if this node is alive)
+			char *str = &buf[1];
+			int heartPort;
+			if(isdigit(*str))
+				heartPort = (int)strtol(str, &str, BASE_TEN);
+
+			printf("Received heart...<3<3<3<3<3\n");
+			pthread_mutex_lock(&heartbeat_mutex);
+			if(start_hbeat || my_node.nodeId == 0){
+				sendHeartAck(heartPort);
+				printf("Sent Ack from %d\n",my_node.nodeId);
+			}
+			pthread_mutex_unlock(&heartbeat_mutex);
+			
+		}
+		else if(strcmp(buf, "yes") == 0){
+			received_ack = true;
+		}
 
 
 
@@ -273,7 +383,7 @@ void * handle_connection(void* sd){
 	}
 
 	close(new_fd);
-	printf("--CONNECTION HAS BEEN CLOSED--\n");
+	// printf("--360 HAS BEEN CLOSED--\n");
 	pthread_exit(NULL);
 }
 
@@ -387,15 +497,17 @@ void * thread_create_server(void * cinfo){
 		}
 
 		// Add to array of Server-Client sockets
-		serv_sockets[socket_idx] = new_fd;
-		socket_idx++;
-
+		if(socket_idx < PROC_COUNT){
+			serv_sockets[socket_idx] = new_fd;
+			socket_idx++;
+		}
+		
 		// Print connector info
 		inet_ntop(their_addr.ss_family,
 			get_in_addr((struct sockaddr *)&their_addr),
 			s, sizeof s);
 
-		printf("[Server id(%lu)]: Got connection from %s.\n", data->pids[x], s);
+		// printf("[Server id(%lu)]: Got connection from %s.\n", data->pids[x], s);
 
 		// Have thread handle the new connection
 		int rc;
@@ -480,7 +592,17 @@ void * thread_create_client(void * cl_info){
 				printf("my_node.fingerTablePorts[%d] = %d\n",i,my_node.fingerTablePorts[i]);
 			// for(int i = 0; i < 256; i++)
 			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
-			// pred_sd = connectToPredecessor();
+			
+
+			// if(my_node.predecessor == 0)
+			// 	start_hbeat = false;
+			// else
+			// 	start_hbeat = true;
+
+			pthread_mutex_lock(&heartbeat_mutex);	
+			start_hbeat = true;
+			pthread_mutex_unlock(&heartbeat_mutex);
+
 		}
 		else if(buf[0] == 'u' && buf[1] == 'p'){
 			// Update Predecessor
@@ -498,15 +620,13 @@ void * thread_create_client(void * cl_info){
 			if(isdigit(*str))
 				my_node.predecessorPort = (int) strtol(str, &str, BASE_TEN);
 
-			
-			// if(my_node.nodeId != 0){
-			// 	if(close(pred_sd))
-			// 		printf("CLOSE ERROR.\n");
-			// 	pred_sd = connectToPredecessor();
-			// }
-			// else{
-			// 	pred_sd = serv_sockets[node_id[my_node.predecessor]];
 
+			// if(my_node.predecessor == 0)
+			// 	start_hbeat = false;
+			// else
+			// 	start_hbeat = true;
+
+			// start_hbeat = true;
 
 			// printf("AFTER UPDATE [PREDECESSOR]:\n");
 			// printf("my_node.node_id = %d\n", my_node.nodeId);
@@ -578,13 +698,10 @@ void * thread_create_client(void * cl_info){
 
 		}
 		else if(strcmp(buf,"crash") == 0){
-			char *msg = malloc(sizeof(Node)+1);
-			int len = serialize(&my_node, msg);
-			msg[len] = '\0';
-			// sleep(min_delay + rand()%(max_delay+1 -min_delay));
-			if (send(sockfd, msg, sizeof(Node)+1, 0) == -1){
-				perror("send");
-			}
+			printf("RECEIVED CRASH\n");
+			pthread_mutex_lock(&heartbeat_mutex);
+			start_hbeat = false;
+			pthread_mutex_unlock(&heartbeat_mutex);
 
 		}
 
@@ -601,7 +718,7 @@ void * thread_create_client(void * cl_info){
 	}
 
 	close(sockfd);
-	printf("--CONNECTION HAS BEEN CLOSED--\n");
+	// printf("--676 HAS BEEN CLOSED--\n");
 	pthread_exit(NULL);
 }
 
@@ -841,6 +958,9 @@ void *stdin_client(void * cinfo){
 				// printf("UPDATE FINGER TABLE MSG: %s\n", msg);
 				unicast_send(msg);
 			}
+			pthread_mutex_lock(&heartbeat_mutex);
+			start_hbeat = true;
+			pthread_mutex_unlock(&heartbeat_mutex);
 
 			free(msg);
 		}
@@ -870,19 +990,21 @@ void *stdin_client(void * cinfo){
 			int p = atoi(&input[6]);
 
 			// Check if Node p is in Chord Network
-			if(node_id[p] == -1){
+			if(node_id[p] < 0){
 				printf("%d does not exist.\n", p);
 				continue;
 			}
-
-			// Set node status to crashed
-			node_id[p] = -2;
 
 			// Send message to Node p to crash
 			int p_sd = node_id[p];
 			if (send(serv_sockets[p_sd], "crash", 5, 0) == -1){
 				perror("send");
 			}
+
+			// Set node status to crashed
+			node_id[p] = -2;
+			// Set node to unused
+			used_pid[p] = false;
 		}
 	}
 	pthread_exit(NULL);	
@@ -1066,6 +1188,10 @@ int main(int argc, char *argv[])
 		cl_info->ip_addr = sep_ips[0];
 		pthread_create(&proc_client[0], NULL, thread_create_client, (void*)cl_info);
 	}
+
+
+	pthread_t heart_;
+	pthread_create(&heart_, NULL, heartbeat, NULL);
 
 	pthread_exit(NULL);
 	return 0;
