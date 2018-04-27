@@ -154,8 +154,11 @@ void *multicast(void* arg){
 	pthread_exit((void *)0);
 }
 
-int connectToPredecessor(){
-	printf("Connecting to Predecessor...\n");
+/* Set up connection to Predecessor and send message */
+void sendToPredecessor(void * arg){
+	char *msg = (char *) arg;
+	printf("SENDING TO PREDECESSOR...\n");
+
 	int sockfd, numbytes;  
 	char buf[MAXDATASIZE];
 	struct addrinfo hints, *servinfo, *p;
@@ -190,63 +193,19 @@ int connectToPredecessor(){
 		break;
 	}
 
+	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
+			s, sizeof s);
+	printf("client: connecting to %s\n", s);
+
 	freeaddrinfo(servinfo); // all done with this structure
-	printf("Connected to Predecessor.\n");
-	return sockfd;
-}
-
-/* Set up connection to Predecessor and send message */
-void sendToPredecessor(void * arg){
-	char *msg = (char *) arg;
-	printf("SENDING TO PREDECESSOR...\n");
-
-	// int sockfd, numbytes;  
-	// char buf[MAXDATASIZE];
-	// struct addrinfo hints, *servinfo, *p;
-	// int rv;
-	// char s[INET6_ADDRSTRLEN];
-
-	// memset(&hints, 0, sizeof hints);
-	// hints.ai_family = AF_UNSPEC;
-	// hints.ai_socktype = SOCK_STREAM;
-
-	// char connection_port[PORT_LEN];
-	// sprintf(connection_port, "%d",my_node.predecessorPort);
-
-	// if ((rv = getaddrinfo("127.0.0.1", connection_port, &hints, &servinfo)) != 0) {
-	// 	fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-	// 	pthread_exit(NULL);
-	// }
-
-	// // Loop through all the results and connect to the first we can
-	// for(p = servinfo; p != NULL; p = p->ai_next) {
-	// 	if ((sockfd = socket(p->ai_family, p->ai_socktype,
-	// 			p->ai_protocol)) == -1) {
-	// 		perror("client: socket");
-	// 		continue;
-	// 	}
-
-	// 	if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-	// 		//perror("client: connect");
-	// 		close(sockfd);
-	// 		continue;
-	// 	}
-	// 	break;
-	// }
-
-	// inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
-	// 		s, sizeof s);
-	// printf("client: connecting to %s\n", s);
-
-	// freeaddrinfo(servinfo); // all done with this structure
 
 	// pred_sd = connectToPredecessor();
 	printf("Client to Server (uf): %s\n", msg);
-	if (send(pred_sd, msg, MAXDATASIZE, 0) == -1){
+	if (send(sockfd, msg, MAXDATASIZE, 0) == -1){
 				perror("send");
 	}
 
-	//close(sockfd);
+	close(sockfd);
 	return;
 }
 
@@ -291,18 +250,6 @@ void * handle_connection(void* sd){
 			str++;
 			if(isdigit(*str))
 				new_nodePort = (int) strtol(str, &str, BASE_TEN);
-
-			// int finger_plus_256 = my_node.fingerTable[i];
-			// if(my_node.fingerTable[i] <= my_node.nodeId && ())
-			// 	finger_plus_256 = my_node.fingerTable[i] + 256;
-
-			// if(new_nodeID >= my_node.nodeId && new_nodeID < finger_plus_256){
-			// 	my_node.fingerTable[i] = new_nodeID;
-			// 	// Send same message to predecessor
-			// 	if(new_nodeID != my_node.predecessor)
-			// 		sendToPredecessor(buf);
-			// }
-
 
 			int a = my_node.fingerTable[i];
 			int b = my_node.nodeId ;
@@ -533,7 +480,7 @@ void * thread_create_client(void * cl_info){
 				printf("my_node.fingerTablePorts[%d] = %d\n",i,my_node.fingerTablePorts[i]);
 			// for(int i = 0; i < 256; i++)
 			// 	printf("my_node.keys[%d] = %d\n",i,my_node.keys[i]);
-			pred_sd = connectToPredecessor();
+			// pred_sd = connectToPredecessor();
 		}
 		else if(buf[0] == 'u' && buf[1] == 'p'){
 			// Update Predecessor
@@ -552,19 +499,21 @@ void * thread_create_client(void * cl_info){
 				my_node.predecessorPort = (int) strtol(str, &str, BASE_TEN);
 
 			
-			if(my_node.nodeId != 0){
-				if(close(pred_sd))
-					printf("CLOSE ERROR.\n");
-				pred_sd = connectToPredecessor();
-			}
-			else{
-				pred_sd = serv_sockets[node_id[my_node.predecessor]];
+			// if(my_node.nodeId != 0){
+			// 	if(close(pred_sd))
+			// 		printf("CLOSE ERROR.\n");
+			// 	pred_sd = connectToPredecessor();
+			// }
+			// else{
+			// 	pred_sd = serv_sockets[node_id[my_node.predecessor]];
+
+
 			// printf("AFTER UPDATE [PREDECESSOR]:\n");
 			// printf("my_node.node_id = %d\n", my_node.nodeId);
 			// printf("my_node.predecessor = %d\n", my_node.predecessor);
 			// printf("my_node.predecessorPort = %d\n", my_node.predecessorPort);
 			// printf("my_node.successor = %d\n", my_node.successor);
-			}
+			// }
 		}
 		else if(buf[0] == 'u' && buf[1] == 'k'){
 			// Update Keys
@@ -601,10 +550,6 @@ void * thread_create_client(void * cl_info){
 			if(isdigit(*str))
 				new_nodePort = (int) strtol(str, &str, BASE_TEN);
 
-			// int finger_plus_256 = my_node.fingerTable[i];
-
-			// if(my_node.fingerTable[i] <= my_node.nodeId)
-			// 	finger_plus_256 = my_node.fingerTable[i] + 256;
 			int a = my_node.fingerTable[i];
 			int b = my_node.nodeId ;
 			int c = new_nodeID;
@@ -616,13 +561,6 @@ void * thread_create_client(void * cl_info){
 				if(new_nodeID != my_node.predecessor)
 					sendToPredecessor(buf);
 			}
-
-			// if(new_nodeID >= my_node.nodeId && new_nodeID < my_node.fingerTable[i]){
-			// 	my_node.fingerTable[i] = new_nodeID;
-			// 	// Send same message to predecessor
-			// 	if(new_nodeID != my_node.predecessor)
-			// 		sendToPredecessor(buf);
-			// }
 		}
 		else if(buf[0] == 's' && buf[5] == 'a'){
 
