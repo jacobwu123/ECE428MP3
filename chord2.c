@@ -50,7 +50,7 @@ bool server_created = false;
 bool used_pid[PROC_COUNT] = {false};
 int node_id[256];	// array of ids in chord network; entry corresponds to line number in config file
 int port_nums[256];
-bool expecting_show = false;
+int expecting_show = 0;
 bool start_hbeat = false;
 bool received_ack = false;
 bool c_keys[256];
@@ -472,7 +472,7 @@ void * handle_connection(void* sd){
 			for(int i = 0; i < 256; i++)
 				printf("keys[%d] = %d\n",i,t_node.keys[i]);
 
-			expecting_show = false;
+			expecting_show --;
 
 		}
 		else if(buf[0] == 'u' && buf[1] == 'f'){
@@ -1142,8 +1142,17 @@ void *stdin_client(void * cinfo){
 		}
 		else if(input[0] == 's' && input[5] == 'a'){
 			// Show all (request information from all nodes in Chord Network)
-
-			// TODO
+			for(int j = 0; j < 256; j++ ){
+				if(node_id[j] > 0){
+					//send reqeust....
+					printf("Show ALL to NODE: %d\n", j);
+					int req_sd = node_id[j];
+					if (send(serv_sockets[req_sd], "show", 5, 0) == -1){
+						perror("send");
+					}
+					expecting_show ++;
+				}
+			}
 
 		}
 		else if(input[0] == 's'){
@@ -1157,7 +1166,7 @@ void *stdin_client(void * cinfo){
 			}
 
 			// If p is in Chord Network, request Node information
-			expecting_show = true;
+			expecting_show ++;
 			int req_sd = node_id[req_node];
 			if (send(serv_sockets[req_sd], "show", 5, 0) == -1){
 				perror("send");
