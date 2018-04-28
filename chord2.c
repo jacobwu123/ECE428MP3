@@ -201,7 +201,7 @@ void sendToPredecessor(void * arg){
 
 	inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr),
 			s, sizeof s);
-	printf("client: connecting to %s\n", s);
+	// printf("client: connecting to %s\n", s);
 
 	freeaddrinfo(servinfo); // all done with this structure
 
@@ -413,7 +413,9 @@ void * heartbeat(void* arg){
 					strcat(msg," ");
 					strcat(msg,my_port);
 					printf("STABILIZATION MESSAGE: %s\n",msg);
-					sendToSuccessor(msg);
+					if(my_node.successor != my_node.predecessor)
+						sendToSuccessor(msg);
+					
 
 					// Check if need to modify own finger table
 					for(int i = 0; i < NUMBER_OF_BITS; i++){
@@ -422,6 +424,15 @@ void * heartbeat(void* arg){
 							my_node.fingerTablePorts[i] = atoi(my_port);
 						}
 					}
+					if(my_node.successor == my_node.predecessor){
+						//only node 0 should do this:
+						my_node.successor = 0;
+						my_node.predecessor = 0;
+						pthread_mutex_lock(&heartbeat_mutex);
+						start_hbeat = false;
+						pthread_mutex_unlock(&heartbeat_mutex);
+					}
+
 				}
 				
 			}
@@ -451,6 +462,8 @@ void * handle_connection(void* sd){
 			Node t_node;
 			memcpy(&t_node, buf, sizeof(Node));
 			printf("Identifier: %d\n", t_node.nodeId);
+			printf("Predecessor: %d\n", t_node.predecessor);
+			printf("Successor: %d\n", t_node.successor);
 			for(int i = 0; i < NUMBER_OF_BITS; i++)
 				printf("fingerTable[%d] = %d\n",i,t_node.fingerTable[i]);
 			for(int i = 0; i < NUMBER_OF_BITS; i++)
@@ -1322,6 +1335,9 @@ int main(int argc, char *argv[])
 	my_node.fingerTable[5] = 0;
 	my_node.fingerTable[6] = 0;
 	my_node.fingerTable[7] = 0;
+	for(int i = 0; i < 8; i++){
+		my_node.fingerTablePorts[i] = ports[0];
+	}
 
 	// Initialize boolean array of keys
 	if(my_pid == 0){
