@@ -469,9 +469,12 @@ void * handle_connection(void* sd){
 				printf("fingerTable[%d] = %d\n",i,t_node.fingerTable[i]);
 			for(int i = 0; i < NUMBER_OF_BITS; i++)
 				printf("fingerTablePorts[%d] = %d\n",i,t_node.fingerTablePorts[i]);
-			for(int i = 0; i < 256; i++)
-				printf("keys[%d] = %d\n",i,t_node.keys[i]);
-
+			printf("Keys: ");
+			for(int i = 0; i < 256; i++){
+				if(t_node.keys[i])
+					printf("%d, ",i);
+			}
+			printf(".\n");
 			expecting_show --;
 
 		}
@@ -733,7 +736,7 @@ void * thread_create_server(void * cinfo){
 			get_in_addr((struct sockaddr *)&their_addr),
 			s, sizeof s);
 
-		// printf("[Server id(%lu)]: Got connection from %s.\n", data->pids[x], s);
+		printf("[Server id(%lu)]: Got connection from %s.\n", data->pids[x], s);
 
 		// Have thread handle the new connection
 		int rc;
@@ -896,11 +899,6 @@ void * thread_create_client(void * cl_info){
 			}
 			
 		}
-		else if(buf[0] == 's' && buf[5] == 'a'){
-
-			//	TODO
-
-		}
 		else if(strcmp(buf,"show") == 0){
 			char *msg = malloc(sizeof(Node)+1);
 			int len = serialize(&my_node, msg);
@@ -920,16 +918,19 @@ void * thread_create_client(void * cl_info){
 			pthread_mutex_unlock(&heartbeat_mutex);
 
 		}
-
+		else if(buf[0] == 'f' && buf[1] == 'i'){
 		/**
 		if find_op
 			send (req to highest node in finger table OR to node with id matching key value)
 			recv (wait for response)
 
-
-
-
 		*/
+			int p = atoi(&buf[5]);
+			if(p == my_node.nodeId){
+
+			}
+		}
+
 
 	}
 
@@ -1143,7 +1144,7 @@ void *stdin_client(void * cinfo){
 		else if(input[0] == 's' && input[5] == 'a'){
 			// Show all (request information from all nodes in Chord Network)
 			for(int j = 0; j < 256; j++ ){
-				if(node_id[j] > 0){
+				if(node_id[j] >= 0){
 					//send reqeust....
 					printf("Show ALL to NODE: %d\n", j);
 					int req_sd = node_id[j];
@@ -1201,6 +1202,22 @@ void *stdin_client(void * cinfo){
 					break;
 				else
 					c_keys[i] = false;
+			}
+
+		}
+		else if(input[0] == 'f'){
+			printf("FIND: %s\n", input);
+			int p = atoi(&input[5]);
+
+			if(node_id[p] < 0){
+				printf("%d does not exist.\n", p);
+				continue;
+			}
+
+			int p_sd = node_id[p];
+			// Send message to Node p to find k
+			if (send(serv_sockets[p_sd], input, strlen(input), 0) == -1){
+				perror("send");
 			}
 
 		}
