@@ -396,6 +396,7 @@ void * heartbeat(void* arg){
 			else{
 				printf("****-------DID NOT RECEIVE ACK!!!!!!!!!!!!--------****\n\n");
 				fault_tol ++;
+				printf(" TOLERENCE:%d\n", fault_tol);
 				if(fault_tol == 5 && !stabilization){
 					//1. send notice msg to successor.
 					//2. in the message: x[pred id] [own nodeid] [own port num]
@@ -502,6 +503,7 @@ void * handle_connection(void* sd){
 				if(new_nodeID != my_node.predecessor)
 					sendToPredecessor(buf);
 			}
+			printf("Updated Finger Table: Entry = %d\n", i);
 		}
 		else if(buf[0] == 'h' /*&& start_hbeat*/){
 			// Received Heart Request (i.e., probing to see if this node is alive)
@@ -890,7 +892,9 @@ void * thread_create_client(void * cl_info){
 
 				if(new_nodeID != my_node.predecessor)
 					sendToPredecessor(buf);
+				printf("Updated Finger Table: Entry = %d\n", i);
 			}
+			
 		}
 		else if(buf[0] == 's' && buf[5] == 'a'){
 
@@ -1133,7 +1137,7 @@ void *stdin_client(void * cinfo){
 			pthread_mutex_lock(&heartbeat_mutex);
 			start_hbeat = true;
 			pthread_mutex_unlock(&heartbeat_mutex);
-
+			stabilization = false;
 			free(msg);
 		}
 		else if(input[0] == 's' && input[5] == 'a'){
@@ -1147,7 +1151,7 @@ void *stdin_client(void * cinfo){
 
 			// Check if p is in Chord Network
 			int req_node = atoi(&input[5]);
-			if(node_id[req_node] == -1){
+			if(node_id[req_node] < 0){
 				printf("%d does not exist.\n", req_node);
 				continue;
 			}
@@ -1176,9 +1180,11 @@ void *stdin_client(void * cinfo){
 			}
 
 			// Set node status to crashed
-			node_id[p] = -1;
 			// Set node to unused
-			used_pid[p] = false;
+			used_pid[node_id[p]] = false;
+			node_id[p] = -2;
+			
+
 
 			// Update global keys
 			for(int i = p; i > 0; i--){
