@@ -26,7 +26,7 @@
 #define BACKLOG 10
 #define MAXDATASIZE 1024 
 #define FILE_NAME "config.txt"
-#define PROC_COUNT 4
+#define PROC_COUNT 32
 #define TTLMSGNUM 50
 #define PORT_LEN    6	   // length of char array to hold port number
 #define SETUP_WAIT  6      // wait time to allow other processes to set up
@@ -316,7 +316,7 @@ void stabilization_helper(void * arg,int port_ack){
 	if (send(sockfd, msg, MAXDATASIZE, 0) == -1){
 				perror("send");
 	}
-	printf("________________SENT FINAL MESSAGE___________!!!!!!!!!!!!!!\n");
+	// printf("________________SENT FINAL MESSAGE___________!!!!!!!!!!!!!!\n");
 	// printf("SENT YES-- From %d to port:%d\n", my_node.nodeId, port_ack);
 	close(sockfd);
 	return;
@@ -591,6 +591,181 @@ void * handle_connection(void* sd){
 				}
 			}
 		}
+		else if(buf[0] == 'f' && buf[1] == 'i' && buf[2] == 'n' && buf[3] == 'd'){
+					/**
+		if find_op
+			send (req to highest node in finger table OR to node with id matching key value)
+			recv (wait for response)
+
+		*/
+			char *str = &buf[5];
+			int k;
+			int root_node;
+			if(isdigit(*str))
+				root_node = (int)strtol(str, &str, BASE_TEN);
+			str++;
+			if(isdigit(*str))
+				k = (int) strtol(str, &str, BASE_TEN);
+
+			printf("Looking for KEY: %d...\n", k);
+			if(k > 255){
+				printf("Key Index ERROR.\n");
+			}
+
+			int a = my_node.nodeId;
+			int b = my_node.predecessor;
+			int c = k;
+			// Check if current node should have the key
+
+
+
+			char find_msg[15];
+
+
+			if((c <= a && a <= b) || (b<c && c <= a) || (a <= b && b < c)){
+				// Check if key exists
+				printf(";SLADKJF;ALKDJF;ASLKDFJA;SLKDFJAS;LDKFJAS;DLKFJAS;DLFKJAS;DFLKJAS;DFLKJAS;DLFKJAS;FDLK\n\n");
+				if(my_node.keys[k]){
+					printf("Found key: %d at node: %d.\n",k,my_node.nodeId);
+
+					// Forward back to root node
+					strcpy(find_msg, "fk");
+					char t_buf[4];
+					sprintf(t_buf,"%d",(my_node.nodeId));
+					strcat(find_msg,t_buf);
+					strcat(find_msg," ");
+					sprintf(t_buf,"%d",(root_node));
+					strcat(find_msg,t_buf);
+
+					// find_msg[10] = '\0';
+				}
+				else{
+					printf("Key does not exist!\n");
+					strcpy(find_msg, "lk");
+					char t_buf[4];
+					sprintf(t_buf,"%d",root_node);
+					strcat(find_msg,t_buf);
+				}
+
+				// Send forward to message
+				int send_port = my_node.fingerTablePorts[7];
+				for(int i = 0; i < NUMBER_OF_BITS; i++){
+					if(my_node.fingerTable[i] == root_node){
+						send_port = my_node.fingerTablePorts[i];
+						break;
+					}
+				}
+				stabilization_helper(find_msg, send_port);
+			}
+			else{
+				//forward message
+				int distance = k > my_node.nodeId? abs(k - my_node.nodeId):abs(k +256- my_node.nodeId);
+				
+				int send_port;
+				int send_node;
+				int distances[NUMBER_OF_BITS];
+				for(int j = 0; j < NUMBER_OF_BITS; j++){
+					if(my_node.fingerTable[j] > my_node.nodeId){
+						distances[j] = my_node.fingerTable[j] - my_node.nodeId;
+					}
+					else{
+						distances[j] = 256 + my_node.fingerTable[j] - my_node.nodeId;
+					}
+				}
+
+				if(distance <= distances[0]){
+					send_node = my_node.fingerTable[0];
+					send_port = my_node.fingerTablePorts[0];
+				}
+				else if(distance <= distances[1]){
+					send_node = my_node.fingerTable[1];
+					send_port = my_node.fingerTablePorts[1];
+				}
+				else if(distance <= distances[2]){
+					send_node = my_node.fingerTable[2];
+					send_port = my_node.fingerTablePorts[2];
+				}
+				else if(distance <= distances[3]){
+					send_node = my_node.fingerTable[3];
+					send_port = my_node.fingerTablePorts[3];
+				}
+				else if(distance <= distances[4]){
+					send_node = my_node.fingerTable[4];
+					send_port = my_node.fingerTablePorts[4];
+				}
+				else if(distance <= distances[5]){
+					send_node = my_node.fingerTable[5];
+					send_port = my_node.fingerTablePorts[5];
+				}
+				else if(distance <= distances[6]){
+					send_node = my_node.fingerTable[6];
+					send_port = my_node.fingerTablePorts[6];
+				}
+				else{
+					send_node = my_node.fingerTable[7];
+					send_port = my_node.fingerTablePorts[7];
+				}
+				
+				printf("Forwad message to node: %d.\n", send_node);
+				stabilization_helper(buf,send_port);
+			}
+
+		}
+		else if((buf[0]== 'f' && buf[1]== 'k') || (buf[0]== 'l' && buf[1]== 'k') ) {
+			// If root node equals my node, print. done
+			char *str = &buf[2];
+			int root_node;
+			int found_nodeID;
+
+			if(buf[0] == 'f'){
+				if(isdigit(*str))
+					found_nodeID = (int)strtol(str, &str, BASE_TEN);
+				str++;
+				if(isdigit(*str))
+					root_node = (int)strtol(str, &str, BASE_TEN);
+
+				if(my_node.nodeId == root_node)
+					printf("FOUND KEY at Node %d\n",found_nodeID);
+				else{
+					// Forward message
+					// Send forward to message
+					int send_port = my_node.fingerTablePorts[7];
+					for(int i = 0; i < NUMBER_OF_BITS; i++){
+						if(my_node.fingerTable[i] == root_node){
+							send_port = my_node.fingerTablePorts[i];
+							break;
+						}
+					}
+					stabilization_helper(buf, send_port);
+				}
+			}
+			else{
+				// Lost Key
+				if(isdigit(*str))
+					found_nodeID = (int)strtol(str, &str, BASE_TEN);
+				str++;
+				if(isdigit(*str))
+					root_node = (int)strtol(str, &str, BASE_TEN);
+
+				if(my_node.nodeId == root_node)
+					printf("Key does not exist!\n");
+				else{
+					// Forward message
+					// Send forward to message
+					int send_port = my_node.fingerTablePorts[7];
+					for(int i = 0; i < NUMBER_OF_BITS; i++){
+						if(my_node.fingerTable[i] == root_node){
+							send_port = my_node.fingerTablePorts[i];
+							break;
+						}
+					}
+					stabilization_helper(buf, send_port);
+				}
+			}
+
+			// Else, forward
+
+		}
 		else if(buf[0]== 'f'){
 				// Finished Stabilization Process
 				// Set predecessor and predecessor port
@@ -609,6 +784,7 @@ void * handle_connection(void* sd){
 				printf("***************************DONE WITH STABILIZATION\n\n\n\n");
 
 		}
+
 
 	}
 
@@ -918,19 +1094,89 @@ void * thread_create_client(void * cl_info){
 			pthread_mutex_unlock(&heartbeat_mutex);
 
 		}
-		else if(buf[0] == 'f' && buf[1] == 'i'){
-		/**
-		if find_op
-			send (req to highest node in finger table OR to node with id matching key value)
-			recv (wait for response)
+		else if(buf[0] == 'f' && buf[1] == 'i' && buf[2] == 'n' &&  buf[3] == 'd'){
 
-		*/
-			int p = atoi(&buf[5]);
-			if(p == my_node.nodeId){
+			char *str = &buf[5];
+			int k;
+			int root_node;
+			if(isdigit(*str))
+				root_node = (int)strtol(str, &str, BASE_TEN);
+			str++;
+			if(isdigit(*str))
+				k = (int) strtol(str, &str, BASE_TEN);
 
+			printf("Looking for KEY: %d...\n", k);
+			if(k > 255){
+				printf("Key Index ERROR.\n");
 			}
+
+			int a = my_node.nodeId;
+			int b = my_node.predecessor;
+			int c = k;
+			// Check if current node should have the key
+			if((c <= a && a <= b) || (b<c && c <= a) || (a <= b && b <c)){
+				if(my_node.keys[k]){
+					printf("Found key: %d at node: %d.\n",k,my_node.nodeId);
+				}
+				else{
+					printf("Key does not exit!\n");
+				}
+			}
+			else{
+				//forward message
+				int distance = k > my_node.nodeId? abs(k - my_node.nodeId):abs(k +256- my_node.nodeId);
+				int send_port;
+				int send_node;
+				int distances[NUMBER_OF_BITS];
+				for(int j = 0; j < NUMBER_OF_BITS; j++){
+					if(my_node.fingerTable[j] > my_node.nodeId){
+						distances[j] = my_node.fingerTable[j] - my_node.nodeId;
+					}
+					else{
+						distances[j] = 256 + my_node.fingerTable[j] - my_node.nodeId;
+					}
+				}
+
+				if(distance <= distances[0]){
+					send_node = my_node.fingerTable[0];
+					send_port = my_node.fingerTablePorts[0];
+				}
+				else if(distance <= distances[1]){
+					send_node = my_node.fingerTable[1];
+					send_port = my_node.fingerTablePorts[1];
+				}
+				else if(distance <= distances[2]){
+					send_node = my_node.fingerTable[2];
+					send_port = my_node.fingerTablePorts[2];
+				}
+				else if(distance <= distances[3]){
+					send_node = my_node.fingerTable[3];
+					send_port = my_node.fingerTablePorts[3];
+				}
+				else if(distance <= distances[4]){
+					send_node = my_node.fingerTable[4];
+					send_port = my_node.fingerTablePorts[4];
+				}
+				else if(distance <= distances[5]){
+					send_node = my_node.fingerTable[5];
+					send_port = my_node.fingerTablePorts[5];
+				}
+				else if(distance <= distances[6]){
+					send_node = my_node.fingerTable[6];
+					send_port = my_node.fingerTablePorts[6];
+				}
+				else{
+					send_node = my_node.fingerTable[7];
+					send_port = my_node.fingerTablePorts[7];
+				}
+				
+				printf("Forwad message to node: %d.\n", send_node);
+				stabilization_helper(buf,send_port);
+			}
+			
 		}
 
+		buf[0] = '\0';
 
 	}
 
@@ -1210,7 +1456,7 @@ void *stdin_client(void * cinfo){
 			int p = atoi(&input[5]);
 
 			if(node_id[p] < 0){
-				printf("%d does not exist.\n", p);
+				printf("%d does not exist!!!!!\n", p);
 				continue;
 			}
 
