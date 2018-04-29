@@ -26,10 +26,10 @@
 #define BACKLOG 10
 #define MAXDATASIZE 1024 
 #define FILE_NAME "config.txt"
-#define PROC_COUNT 32
+#define PROC_COUNT 5
 #define TTLMSGNUM 50
 #define PORT_LEN    6	   // length of char array to hold port number
-#define SETUP_WAIT  6      // wait time to allow other processes to set up
+#define SETUP_WAIT  10	      // wait time to allow other processes to set up
 #define BASE_TEN    10	   // used to denote base ten in format conversion
 #define IPADDR_LEN  16     // length of char array to hold ip address
 #define PORT_LEN    6	   // length of char array to hold port number
@@ -509,10 +509,10 @@ void * handle_connection(void* sd){
 				// Send same message to predecessor
 				if(new_nodeID != my_node.predecessor){
 					sendToPredecessor(buf);
-					pthread_mutex_lock(&p1_mutex)
+					pthread_mutex_lock(&p1_mutex);
 					p1_counter++;
-					printf("P1_counter: %d\n", p1_counter);
-					pthread_mutex_unlock(&p1_mutex)
+					printf("P1_counter: %d**********************************************************\n", p1_counter);
+					pthread_mutex_unlock(&p1_mutex);
 				}
 			}
 			printf("Updated Finger Table: Entry = %d\n", i);
@@ -667,7 +667,7 @@ void * handle_connection(void* sd){
 				stabilization_helper(find_msg, send_port);
 				pthread_mutex_lock(&p2_mutex);
 				p2_counter++;
-				printf("p2_counter: %d\n", p2_counter);
+				printf("p2_counter: %d*****************************************************\n", p2_counter);
 				pthread_mutex_unlock(&p2_mutex);
 			}
 			else{
@@ -723,7 +723,7 @@ void * handle_connection(void* sd){
 				stabilization_helper(buf,send_port);
 				pthread_mutex_lock(&p2_mutex);
 				p2_counter++;
-				printf("p2_counter: %d\n", p2_counter);
+				printf("p2_counter: %d*****************************************************\n", p2_counter);
 				pthread_mutex_unlock(&p2_mutex);
 			}
 
@@ -756,7 +756,7 @@ void * handle_connection(void* sd){
 					stabilization_helper(buf, send_port);
 					pthread_mutex_lock(&p2_mutex);
 					p2_counter++;
-					printf("p2_counter: %d\n", p2_counter);
+					printf("p2_counter: %d*****************************************************\n", p2_counter);
 					pthread_mutex_unlock(&p2_mutex);
 				}
 			}
@@ -783,7 +783,7 @@ void * handle_connection(void* sd){
 					stabilization_helper(buf, send_port);
 					pthread_mutex_lock(&p2_mutex);
 					p2_counter++;
-					printf("p2_counter: %d\n", p2_counter);
+					printf("p2_counter: %d*****************************************************\n", p2_counter);
 					pthread_mutex_unlock(&p2_mutex);
 				}
 			}
@@ -1098,10 +1098,10 @@ void * thread_create_client(void * cl_info){
 					sendToPredecessor(buf);
 				printf("Updated Finger Table: Entry = %d\n", i);
 
-				pthread_mutex_lock(&p1_mutex)
+				pthread_mutex_lock(&p1_mutex);
 				p1_counter++;
-				printf("P1_counter: %d\n", p1_counter);
-				pthread_mutex_unlock(&p1_mutex)
+				printf("P1_counter: %d*****************************************************************\n", p1_counter);
+				pthread_mutex_unlock(&p1_mutex);
 			}
 			
 		}
@@ -1204,7 +1204,7 @@ void * thread_create_client(void * cl_info){
 				stabilization_helper(buf,send_port);
 				pthread_mutex_lock(&p2_mutex);
 				p2_counter++;
-				printf("p2_counter: %d\n", p2_counter);
+				printf("p2_counter: %d*****************************************************\n", p2_counter);
 				pthread_mutex_unlock(&p2_mutex);
 			}
 			
@@ -1345,10 +1345,10 @@ void *stdin_client(void * cinfo){
 			if (send(serv_sockets[node_id[p]], msg, sizeof(Node)+2, 0) == -1){
 				perror("send");
 			}
-			pthread_mutex_lock(&p1_mutex)
+			pthread_mutex_lock(&p1_mutex);
 			p1_counter++;
-			printf("P1_counter: %d\n", p1_counter);
-			pthread_mutex_unlock(&p1_mutex)
+			printf("P1_counter: %d*************************************************************************\n", p1_counter);
+			pthread_mutex_unlock(&p1_mutex);
 
 			// Tell Successor of new node to update keys
 			// (successor should set to false [successor.predecessor+1, new_id])
@@ -1357,10 +1357,10 @@ void *stdin_client(void * cinfo){
 			strcpy(&(msg[1]), "uk");
 			sprintf(&(msg[3]),"%d",(p));
 			unicast_send(msg);
-			pthread_mutex_lock(&p1_mutex)
+			pthread_mutex_lock(&p1_mutex);
 			p1_counter++;
-			printf("P1_counter: %d\n", p1_counter);
-			pthread_mutex_unlock(&p1_mutex)
+			printf("P1_counter: %d*************************************************************************\n", p1_counter);
+			pthread_mutex_unlock(&p1_mutex);
 
 			// Tell successor of new node to update it's predecessor
 			msg[0] = '\0';
@@ -1372,10 +1372,10 @@ void *stdin_client(void * cinfo){
 			sprintf(t_port,"%d",port_nums[p]);
 			strcat(msg,t_port);
 			unicast_send(msg);
-			pthread_mutex_lock(&p1_mutex)
+			pthread_mutex_lock(&p1_mutex);
 			p1_counter++;
-			printf("P1_counter: %d\n", p1_counter);
-			pthread_mutex_unlock(&p1_mutex)
+			printf("P1_counter: %d**************************************************************************\n", p1_counter);
+			pthread_mutex_unlock(&p1_mutex);
 
 			// Tell other nodes to update their finger tables (per Pg.6 of chord_sigcomm.pdf)
 			for(int i = 0; i < NUMBER_OF_BITS; i++){
@@ -1426,10 +1426,10 @@ void *stdin_client(void * cinfo){
 				strcat(msg, t_port);
 				// printf("UPDATE FINGER TABLE MSG: %s\n", msg);
 				unicast_send(msg);
-				pthread_mutex_lock(&p1_mutex)
+				pthread_mutex_lock(&p1_mutex);
 				p1_counter++;
-				printf("P1_counter: %d\n", p1_counter);
-				pthread_mutex_unlock(&p1_mutex)
+				printf("P1_counter: %d******************************************************************\n", p1_counter);
+				pthread_mutex_unlock(&p1_mutex);
 			}
 			pthread_mutex_lock(&heartbeat_mutex);
 			start_hbeat = true;
@@ -1517,7 +1517,7 @@ void *stdin_client(void * cinfo){
 			}
 			pthread_mutex_lock(&p2_mutex);
 			p2_counter++;
-			printf("p2_counter: %d\n", p2_counter);
+			printf("p2_counter: %d*****************************************************\n", p2_counter);
 			pthread_mutex_unlock(&p2_mutex);
 
 
